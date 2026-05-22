@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 const SPOTIFY_CLIENT_ID = "80383eb1983d4282b296c26b91b75b6d";
-const GEMINI_API_KEY = "AIzaSyDA4lmH8_AgFLeN6yQfByGPfnA7VtZAcaU";
-const SPOTIFY_CLIENT_ID_KEY = "spotilive_client_id";
 const SPOTIFY_SCOPES = [
   "user-read-currently-playing",
   "user-read-playback-state",
@@ -23,12 +21,30 @@ async function generateCodeChallenge(verifier) {
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
-const LASTFM_API = "https://ws.audioscrobbler.com/2.0/";
+const LASTFM_KEY = "43a8dd6083e2571bf6e47c5d88a88a7f";
 async function lastfmFetch(params) {
-  const url = new URL(LASTFM_API);
+  const url = new URL("https://ws.audioscrobbler.com/2.0/");
   Object.entries({ ...params, format: "json" }).forEach(([k, v]) => url.searchParams.set(k, v));
   const res = await fetch(url);
   return res.json();
+}
+
+async function wikipediaFetch(query, lang = "fr") {
+  // 1. Recherche de la page la plus pertinente
+  const searchUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=1&format=json&origin=*`;
+  const searchRes = await fetch(searchUrl);
+  const searchData = await searchRes.json();
+  const pageTitle = searchData?.query?.search?.[0]?.title;
+  if (!pageTitle) return null;
+
+  // 2. Récupération de l'extrait de la page
+  const pageUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(pageTitle)}&format=json&origin=*`;
+  const pageRes = await fetch(pageUrl);
+  const pageData = await pageRes.json();
+  const pages = pageData?.query?.pages;
+  if (!pages) return null;
+  const page = Object.values(pages)[0];
+  return page?.extract || null;
 }
 
 function msToTime(ms) {
@@ -39,9 +55,18 @@ function fmtNum(n) {
   if (!n) return "—";
   return Number(n).toLocaleString("fr-BE");
 }
+function cleanAndTruncate(text, maxChars = 600) {
+  if (!text) return "";
+  // Supprimer contenu entre parenthèses si trop long, nettoyer espaces
+  let t = text.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
+  if (t.length <= maxChars) return t;
+  // Couper à la fin d'une phrase avant maxChars
+  const cut = t.slice(0, maxChars);
+  const lastDot = cut.lastIndexOf(".");
+  return lastDot > maxChars * 0.6 ? t.slice(0, lastDot + 1) : cut + "…";
+}
 
 export default function SpotiLive() {
-  const [clientId] = useState(SPOTIFY_CLIENT_ID);
   const [lastfmKey, setLastfmKey] = useState(() => localStorage.getItem("spotilive_lastfm_key") || "");
   const [lastfmKeyInput, setLastfmKeyInput] = useState("");
   const [lastfmUser, setLastfmUser] = useState(() => localStorage.getItem("spotilive_lastfm_user") || "");
@@ -62,7 +87,6 @@ export default function SpotiLive() {
 
   const [aiContent, setAiContent] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
-  const [geminiDebug, setGeminiDebug] = useState(null);
 
   const [activeTab, setActiveTab] = useState("now");
   const pollRef = useRef(null);
@@ -70,14 +94,13 @@ export default function SpotiLive() {
   const progressRef = useRef(null);
 
   const handleSpotifyLogin = async () => {
-    const id = SPOTIFY_CLIENT_ID;
     const verifier = generateCodeVerifier();
     const challenge = await generateCodeChallenge(verifier);
     sessionStorage.setItem("pkce_verifier", verifier);
     const redirectUri = window.location.href.split("?")[0].split("#")[0];
     sessionStorage.setItem("pkce_redirect", redirectUri);
     const params = new URLSearchParams({
-      client_id: id, response_type: "code", redirect_uri: redirectUri,
+      client_id: SPOTIFY_CLIENT_ID, response_type: "code", redirect_uri: redirectUri,
       scope: SPOTIFY_SCOPES, code_challenge_method: "S256", code_challenge: challenge,
     });
     window.location.href = "https://accounts.spotify.com/authorize?" + params;
@@ -95,8 +118,7 @@ export default function SpotiLive() {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           grant_type: "authorization_code", code,
-          redirect_uri: redirectUri, client_id: SPOTIFY_CLIENT_ID,
-          code_verifier: verifier,
+          redirect_uri: redirectUri, client_id: SPOTIFY_CLIENT_ID, code_verifier: verifier,
         }),
       }).then(r => r.json()).then(data => {
         if (data.access_token) {
@@ -121,46 +143,25 @@ export default function SpotiLive() {
     return res.json();
   }, [token]);
 
-  const fetchCurrent = useCallback(async () => {
-    const data = await spotifyFetch("me/player/currently-playing");
-    if (!data || !data.item) { setCurrent(null); setIsPlaying(false); return; }
-    setIsPlaying(data.is_playing);
-    setProgress(data.progress_ms || 0);
-    const track = data.item;
-    setCurrent(track);
-    if (track.id !== lastTrackRef.current) {
-      lastTrackRef.current = track.id;
-      fetchTrackStats(track);
-      fetchArtistStats(track.artists[0]);
-      generateAiContent(track);
-    }
-  }, [spotifyFetch]);
-
   const fetchTrackStats = async (track) => {
-    const feat = await spotifyFetch(`audio-features/${track.id}`);
-    let lfm = null;
-    const key = lastfmKey || "43a8dd6083e2571bf6e47c5d88a88a7f";
+    const key = lastfmKey || LASTFM_KEY;
     try {
       const r = await lastfmFetch({ method: "track.getInfo", api_key: key, artist: track.artists[0].name, track: track.name, username: lastfmUser || undefined });
-      lfm = r?.track;
+      setTrackStats({ lastfm: r?.track });
     } catch {}
-    setTrackStats({ spotify: feat, lastfm: lfm });
   };
 
   const fetchArtistStats = async (artist) => {
-    const data = await spotifyFetch(`artists/${artist.id}`);
-    let lfm = null;
-    const key = lastfmKey || "43a8dd6083e2571bf6e47c5d88a88a7f";
+    const key = lastfmKey || LASTFM_KEY;
     try {
       const r = await lastfmFetch({ method: "artist.getInfo", api_key: key, artist: artist.name, lang: "fr" });
-      lfm = r?.artist;
+      setArtistStats({ lastfm: r?.artist });
     } catch {}
-    setArtistStats({ spotify: data, lastfm: lfm });
   };
 
   const fetchLastfmStats = useCallback(async () => {
     if (!lastfmUser) return;
-    const key = lastfmKey || "43a8dd6083e2571bf6e47c5d88a88a7f";
+    const key = lastfmKey || LASTFM_KEY;
     try {
       const [profile, recent] = await Promise.all([
         lastfmFetch({ method: "user.getInfo", api_key: key, user: lastfmUser }),
@@ -181,113 +182,92 @@ export default function SpotiLive() {
     if (topArt?.items) setTopArtists(topArt.items);
   }, [spotifyFetch]);
 
-  const geminiEnrich = async (track, lfmArtist, lfmTrack) => {
-    const artistName = track.artists[0].name;
-    const trackName = track.name;
-    const yr = track.album.release_date?.slice(0, 4) || "";
-    const albumName = track.album.name;
-    const tags = lfmArtist?.tags?.tag?.map(t => t.name).join(", ") || "";
-    const lfmBioRaw = (lfmArtist?.bio?.summary || "").replace(/<[^>]+>/g, "").trim().slice(0, 300);
-    const lfmWikiRaw = (lfmTrack?.wiki?.summary || "").replace(/<[^>]+>/g, "").trim().slice(0, 300);
-
-    const prompt = `Tu es un expert musical passionné. Réponds UNIQUEMENT en français, sans exception.
-
-Artiste: ${artistName}
-Chanson: ${trackName}
-Album: ${albumName} (${yr})
-Tags: ${tags || "non disponibles"}
-Bio Last.fm: ${lfmBioRaw || "non disponible"}
-Info chanson Last.fm: ${lfmWikiRaw || "non disponible"}
-
-Écris exactement 4 blocs séparés par la ligne ---
-
-BIO
-Biographie détaillée et passionnante de ${artistName} en 5-6 phrases complètes en français. Couvre les origines, le style, les influences, les albums importants, les succès, les anecdotes. Si tu manques d'infos précises, développe intelligemment à partir du genre et de l'époque.
-
----
-
-CHANSON
-Explication approfondie de la chanson "${trackName}" en 4-5 phrases complètes en français. Couvre le contexte de création, les thèmes, l'ambiance sonore, la place dans la discographie.
-
----
-
-GENRE
-Genre musical en 1-3 mots en français
-
----
-
-AMBIANCE
-Ambiance en 2-3 mots français maximum`;
-
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.6, maxOutputTokens: 1500 },
-        }),
-      }
-    );
-    const data = await res.json();
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    setGeminiDebug({ raw: raw.slice(0, 600), error: data.error?.message || null });
-
-    if (data.error) throw new Error(data.error.message);
-    if (!raw) throw new Error("Empty response");
-
-    const parts = raw.split(/\n---\n/);
-    const extract = (label) => {
-      const idx = parts.findIndex(p => p.trim().toUpperCase().startsWith(label));
-      if (idx === -1) return "";
-      return parts[idx].replace(new RegExp("^" + label + "\\s*", "i"), "").trim();
-    };
-
-    return {
-      bio: extract("BIO"),
-      explication: extract("CHANSON"),
-      genre: extract("GENRE"),
-      ambiance: extract("AMBIANCE"),
-    };
-  };
-
   const generateAiContent = async (track) => {
     setAiContent(null);
     setAiLoading(true);
-    setGeminiDebug(null);
     try {
       const artistName = track.artists[0].name;
       const trackName = track.name;
-      const key = lastfmKey || "43a8dd6083e2571bf6e47c5d88a88a7f";
+      const albumName = track.album.name;
+      const yr = track.album.release_date?.slice(0, 4) || "";
+      const key = lastfmKey || LASTFM_KEY;
 
-      const [lfmArtistRes, lfmTrackRes, mbRes] = await Promise.all([
-        fetch(`https://ws.audioscrobbler.com/2.0/?method=artist.getInfo&artist=${encodeURIComponent(artistName)}&lang=fr&api_key=${key}&format=json`).then(r => r.json()).catch(() => ({})),
-        fetch(`https://ws.audioscrobbler.com/2.0/?method=track.getInfo&artist=${encodeURIComponent(artistName)}&track=${encodeURIComponent(trackName)}&api_key=${key}&format=json`).then(r => r.json()).catch(() => ({})),
-        fetch(`https://musicbrainz.org/ws/2/recording/?query=recording:"${encodeURIComponent(trackName)}" AND artist:"${encodeURIComponent(artistName)}"&limit=1&fmt=json`, { headers: { "User-Agent": "SpotiLive/1.0" } }).then(r => r.json()).catch(() => ({})),
+      // Toutes les sources en parallèle
+      const [lfmArtistRes, lfmTrackRes, mbRes, wikiArtist, wikiTrack] = await Promise.all([
+        lastfmFetch({ method: "artist.getInfo", api_key: key, artist: artistName, lang: "fr" }).catch(() => ({})),
+        lastfmFetch({ method: "track.getInfo", api_key: key, artist: artistName, track: trackName }).catch(() => ({})),
+        fetch(
+          `https://musicbrainz.org/ws/2/recording/?query=recording:"${encodeURIComponent(trackName)}" AND artist:"${encodeURIComponent(artistName)}"&limit=1&fmt=json`,
+          { headers: { "User-Agent": "SpotiLive/1.0 (https://spotilive.netlify.app)" } }
+        ).then(r => r.json()).catch(() => ({})),
+        // Wikipedia FR pour l'artiste
+        wikipediaFetch(artistName, "fr").catch(() => null),
+        // Wikipedia FR pour la chanson (ex: "Yesterday Beatles")
+        wikipediaFetch(`${trackName} ${artistName}`, "fr").catch(() => null),
       ]);
 
       const lfmArtist = lfmArtistRes?.artist;
       const lfmTrack = lfmTrackRes?.track;
       const mbRecording = mbRes?.recordings?.[0];
 
-      let gemini = null;
-      try { gemini = await geminiEnrich(track, lfmArtist, lfmTrack); }
-      catch (e) { setGeminiDebug(d => ({ ...d, parseError: e.message })); }
+      // ── BIO ──────────────────────────────────────────────────────────────
+      // Priorité : Wikipedia FR > Last.fm bio FR > fallback
+      let bio = "";
+      if (wikiArtist && wikiArtist.length > 100) {
+        bio = cleanAndTruncate(wikiArtist, 700);
+      } else {
+        const lfmBio = (lfmArtist?.bio?.content || lfmArtist?.bio?.summary || "")
+          .replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "")
+          .replace(/<[^>]+>/g, "")
+          .replace(/\s+/g, " ").trim();
+        bio = cleanAndTruncate(lfmBio, 700);
+      }
+      if (!bio) bio = `${artistName} est un artiste musical. Aucune biographie détaillée n'est disponible dans les sources consultées.`;
 
-      const tags = lfmArtist?.tags?.tag?.map(t => t.name) || [];
-      const genre = gemini?.genre || tags[0] || "—";
-      const ambiance = gemini?.ambiance || tags.slice(1, 3).join(", ") || "—";
-      const bio = gemini?.bio || "Biographie non disponible.";
-      const yr = track.album.release_date?.slice(0, 4);
-      const explication = gemini?.explication || `"${trackName}" est un titre de ${artistName}, extrait de l'album "${track.album.name}"${yr ? ` (${yr})` : ""}.`;
+      // ── EXPLICATION DE LA CHANSON ─────────────────────────────────────────
+      // Priorité : Wikipedia FR chanson > Last.fm wiki > fiche factuelle
+      let explication = "";
+      if (wikiTrack && wikiTrack.length > 80) {
+        // Vérifier que Wikipedia parle bien de la bonne chanson (pas juste de l'artiste)
+        const relevant = wikiTrack.toLowerCase().includes(trackName.toLowerCase().slice(0, 6)) ||
+                         wikiTrack.toLowerCase().includes(artistName.toLowerCase().slice(0, 6));
+        if (relevant) explication = cleanAndTruncate(wikiTrack, 600);
+      }
+      if (!explication) {
+        const lfmWiki = (lfmTrack?.wiki?.content || lfmTrack?.wiki?.summary || "")
+          .replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "")
+          .replace(/<[^>]+>/g, "")
+          .replace(/\s+/g, " ").trim();
+        if (lfmWiki.length > 50) explication = cleanAndTruncate(lfmWiki, 600);
+      }
+      if (!explication) {
+        const dur = track.duration_ms
+          ? `${Math.floor(track.duration_ms / 60000)}m${String(Math.floor((track.duration_ms % 60000) / 1000)).padStart(2, "0")}s`
+          : null;
+        const parts = [`"${trackName}" est un titre de ${artistName}, extrait de l'album "${albumName}"${yr ? ` sorti en ${yr}` : ""}.`];
+        if (dur) parts.push(`La chanson dure ${dur}.`);
+        if (lfmTrack?.playcount) parts.push(`Elle totalise ${Number(lfmTrack.playcount).toLocaleString("fr-BE")} écoutes sur Last.fm.`);
+        explication = parts.join(" ");
+      }
 
+      // ── GENRE & AMBIANCE ──────────────────────────────────────────────────
+      const tags = lfmArtist?.tags?.tag?.map(t => t.name) ||
+                   lfmTrack?.toptags?.tag?.map(t => t.name) || [];
+      const genre = tags[0] || "—";
+      const ambiance = tags.slice(1, 3).join(", ") || "—";
+
+      // ── ANECDOTES ─────────────────────────────────────────────────────────
       const anecdotes = [];
-      if (mbRecording?.length) anecdotes.push(`Durée officielle : ${Math.floor(mbRecording.length / 60000)}m${String(Math.floor((mbRecording.length % 60000) / 1000)).padStart(2, "0")}s.`);
+      if (mbRecording?.length) {
+        const m = Math.floor(mbRecording.length / 60000);
+        const s = String(Math.floor((mbRecording.length % 60000) / 1000)).padStart(2, "0");
+        anecdotes.push(`Durée officielle selon MusicBrainz : ${m}m${s}s.`);
+      }
       if (mbRecording?.releases?.[0]?.date) anecdotes.push(`Date de sortie officielle : ${mbRecording.releases[0].date}.`);
       if (mbRecording?.releases?.[0]?.country) anecdotes.push(`Pays de sortie : ${mbRecording.releases[0].country}.`);
       if (lfmTrack?.playcount) anecdotes.push(`Ce titre totalise ${Number(lfmTrack.playcount).toLocaleString("fr-BE")} écoutes sur Last.fm.`);
       if (lfmArtist?.stats?.listeners) anecdotes.push(`${Number(lfmArtist.stats.listeners).toLocaleString("fr-BE")} auditeurs uniques sur Last.fm.`);
+      if (mbRecording?.releases?.length > 1) anecdotes.push(`Ce titre est apparu sur ${mbRecording.releases.length} sorties différentes selon MusicBrainz.`);
 
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
     } catch (e) {
@@ -295,6 +275,21 @@ Ambiance en 2-3 mots français maximum`;
     }
     setAiLoading(false);
   };
+
+  const fetchCurrent = useCallback(async () => {
+    const data = await spotifyFetch("me/player/currently-playing");
+    if (!data || !data.item) { setCurrent(null); setIsPlaying(false); return; }
+    setIsPlaying(data.is_playing);
+    setProgress(data.progress_ms || 0);
+    const track = data.item;
+    setCurrent(track);
+    if (track.id !== lastTrackRef.current) {
+      lastTrackRef.current = track.id;
+      fetchTrackStats(track);
+      fetchArtistStats(track.artists[0]);
+      generateAiContent(track);
+    }
+  }, [spotifyFetch]);
 
   useEffect(() => {
     if (!token) return;
@@ -348,10 +343,12 @@ Ambiance en 2-3 mots français maximum`;
                 if (lastfmUserInput) { localStorage.setItem("spotilive_lastfm_user", lastfmUserInput); setLastfmUser(lastfmUserInput); }
               }}>Sauvegarder Last.fm</button>
             )}
-            <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer" style={styles.configLink}>→ Obtenir une clé API Last.fm (gratuit)</a>
+            <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer" style={styles.configLink}>
+              Obtenir une clé API Last.fm (gratuit)
+            </a>
           </div>
         </div>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&family=DM+Mono:wght@300;400&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; }`}</style>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600&family=DM+Mono:wght@300;400&display=swap'); *{box-sizing:border-box;margin:0;padding:0}`}</style>
       </div>
     );
   }
@@ -366,9 +363,7 @@ Ambiance en 2-3 mots français maximum`;
       <header style={styles.header}>
         <div style={styles.headerLogo}>SpotiLive</div>
         <div style={styles.headerRight}>
-          {lastfmProfile && (
-            <span style={styles.lfmBadge}>📻 {lastfmProfile.name} · {fmtNum(lastfmProfile.playcount)} écoutes</span>
-          )}
+          {lastfmProfile && <span style={styles.lfmBadge}>📻 {lastfmProfile.name} · {fmtNum(lastfmProfile.playcount)} écoutes</span>}
           <button style={styles.btnIcon} onClick={() => setShowConfig(true)}>⚙</button>
           <button style={styles.btnIcon} onClick={logout}>✕</button>
         </div>
@@ -435,7 +430,7 @@ Ambiance en 2-3 mots français maximum`;
               {aiLoading ? (
                 <div style={styles.aiLoading}>
                   <div style={styles.aiSpinner} />
-                  <p>Analyse en cours…</p>
+                  <p>Chargement…</p>
                 </div>
               ) : aiContent ? (
                 <>
@@ -481,19 +476,9 @@ Ambiance en 2-3 mots français maximum`;
                       </div>
                     </div>
                   )}
-                  {geminiDebug && (
-                    <div style={{ ...styles.aiBlock, borderColor: "rgba(255,100,100,.3)" }}>
-                      <h3 style={{ ...styles.aiTitle, color: "#ff6b6b" }}>Debug Gemini</h3>
-                      <p style={{ fontSize: 10, opacity: 0.7, wordBreak: "break-all", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
-                        {geminiDebug.error ? "ERREUR: " + geminiDebug.error : (geminiDebug.parseError ? "PARSE ERROR: " + geminiDebug.parseError + "\n\nRAW:\n" + geminiDebug.raw : geminiDebug.raw) || "Réponse vide"}
-                      </p>
-                    </div>
-                  )}
                 </>
               ) : current ? null : (
-                <div style={styles.aiPlaceholder}>
-                  <p>Les informations sur la chanson apparaîtront ici</p>
-                </div>
+                <div style={styles.aiPlaceholder}><p>Les informations apparaîtront ici</p></div>
               )}
             </div>
           </div>
@@ -595,7 +580,7 @@ Ambiance en 2-3 mots français maximum`;
       )}
 
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&family=DM+Mono:wght@300;400&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600&family=DM+Mono:wght@300;400&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes ring { 0%{transform:scale(1);opacity:.8} 100%{transform:scale(1.15);opacity:0} }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -610,7 +595,7 @@ const styles = {
   ambientBg: { position: "fixed", inset: 0, backgroundSize: "cover", backgroundPosition: "center", filter: "blur(80px) saturate(1.8)", opacity: 0.12, transform: "scale(1.1)", transition: "background-image 2s ease", zIndex: 0 },
   overlay: { position: "fixed", inset: 0, background: "linear-gradient(180deg, rgba(10,10,15,.95) 0%, rgba(10,10,15,.85) 100%)", zIndex: 1 },
   header: { position: "relative", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.06)", backdropFilter: "blur(20px)" },
-  headerLogo: { fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, letterSpacing: "-0.5px", background: "linear-gradient(135deg, #1db954, #1ed760)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
+  headerLogo: { fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, background: "linear-gradient(135deg, #1db954, #1ed760)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
   headerRight: { display: "flex", alignItems: "center", gap: 12 },
   lfmBadge: { fontSize: 11, opacity: 0.6, background: "rgba(255,255,255,.06)", padding: "5px 10px", borderRadius: 20 },
   btnIcon: { background: "rgba(255,255,255,.08)", border: "none", color: "#f0ede8", cursor: "pointer", width: 32, height: 32, borderRadius: "50%", fontSize: 14 },
