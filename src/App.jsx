@@ -88,7 +88,7 @@ export default function SpotiLive() {
 
   const [aiContent, setAiContent] = useState(null);
   const [quickInfo, setQuickInfo] = useState({ genre: "—", ambiance: "—", playcount: null });
-  const [recommendations, setRecommendations] = useState({ tracks: [], artists: [] });
+  const [recommendations, setRecommendations] = useState({ tracks: [], artists: [], error: null });
   const [aiLoading, setAiLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState("now");
@@ -246,14 +246,16 @@ export default function SpotiLive() {
       const trackId = track.id;
       // Spotify recommendations endpoint
       const res = await fetch(
-        `https://api.spotify.com/v1/recommendations?seed_artists=${artistId}&seed_tracks=${trackId}&limit=10&market=FR`,
+        `https://api.spotify.com/v1/recommendations?seed_artists=${artistId}&seed_tracks=${trackId}&limit=10&market=BE`,
         { headers: { Authorization: `Bearer ${currentToken}` } }
       );
+      const resText = await res.text();
       if (!res.ok) {
-        console.warn("Recs failed:", res.status, await res.text().catch(() => ""));
+        // Show error in recommendations area for debug
+        setRecommendations({ tracks: [], artists: [], error: `${res.status}: ${resText.slice(0,100)}` });
         return;
       }
-      const data = await res.json();
+      const data = JSON.parse(resText);
       const recTracks = data.tracks || [];
       // Extract unique artists from recommended tracks
       const artistMap = new Map();
@@ -294,7 +296,7 @@ export default function SpotiLive() {
     setAiContent(null);
     setAiLoading(true);
     setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
-    setRecommendations({ tracks: [], artists: [] });
+    setRecommendations({ tracks: [], artists: [], error: null });
     try {
       const artistName = track.artists[0].name;
       const trackName = track.name;
@@ -683,6 +685,12 @@ ANECDOTES
                     </div>
                   )}
 
+                  {recommendations.error && (
+                    <div style={{ ...styles.aiBlock, borderColor: "rgba(255,100,100,.3)" }}>
+                      <h3 style={{ ...styles.aiTitle, color: "#ff6b6b" }}>Recs debug</h3>
+                      <p style={{ fontSize: 11, opacity: 0.7, wordBreak: "break-all" }}>{recommendations.error}</p>
+                    </div>
+                  )}
                   {recommendations.tracks.length > 0 && (
                     <div style={styles.aiBlock}>
                       <h3 style={styles.aiTitle}>Titres similaires</h3>
