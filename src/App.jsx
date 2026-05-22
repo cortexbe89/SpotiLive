@@ -243,34 +243,57 @@ export default function SpotiLive() {
     if (!currentToken) return;
     try {
       const artistId = track.artists[0].id;
+      const artistName = track.artists[0].name;
       const headers = { Authorization: `Bearer ${currentToken}` };
+      const lfmKey = LASTFM_KEY;
 
-      // related-artists + top-tracks : deux endpoints encore disponibles
-      const [relatedRes, topTracksRes] = await Promise.all([
-        fetch(`https://api.spotify.com/v1/artists/${artistId}/related-artists`, { headers })
-          .then(r => r.ok ? r.json() : null).catch(() => null),
+      // Top tracks Spotify (encore disponible) + artistes similaires Last.fm
+      const [topTracksRes, similarRes] = await Promise.all([
         fetch(`https://api.spotify.com/v1/artists/${artistId}/top-tracks?market=BE`, { headers })
           .then(r => r.ok ? r.json() : null).catch(() => null),
+        lastfmFetch({ method: "artist.getSimilar", api_key: lfmKey, artist: artistName, limit: 6 })
+          .catch(() => null),
       ]);
 
-      // Artistes similaires
-      const relatedArtists = (relatedRes?.artists || []).slice(0, 6).map(a => ({
-        id: a.id,
-        name: a.name,
-        uri: a.uri,
-        image: a.images?.[2]?.url || a.images?.[0]?.url || null,
-        genres: a.genres || [],
-      }));
-
-      // Top tracks de l'artiste (hors track en cours)
+      // Top tracks hors track en cours
       const topTracks = (topTracksRes?.tracks || [])
         .filter(t => t.id !== track.id)
         .slice(0, 6);
 
-      setRecommendations({ tracks: topTracks, artists: relatedArtists, error: null });
+      // Artistes similaires via Last.fm
+      const similarArtistsRaw = similarRes?.similarartists?.artist || [];
+      const similarNames = similarArtistsRaw.slice(0, 6).map(a => a.name);
+
+      // Chercher les IDs Spotify pour les artistes similaires (pour les liens et images)
+      const similarWithSpotify = await Promise.all(
+        similarNames.map(async name => {
+          try {
+            const res = await fetch(
+              `https://api.spotify.com/v1/search?q=${encodeURIComponent(name)}&type=artist&limit=1&market=BE`,
+              { headers }
+            ).then(r => r.ok ? r.json() : null);
+            const artist = res?.artists?.items?.[0];
+            if (artist) {
+              return {
+                id: artist.id,
+                name: artist.name,
+                uri: artist.uri,
+                image: artist.images?.[2]?.url || artist.images?.[0]?.url || null,
+                genres: artist.genres?.slice(0, 1) || [],
+              };
+            }
+          } catch {}
+          return { id: name, name, uri: null, image: null, genres: [] };
+        })
+      );
+
+      setRecommendations({
+        tracks: topTracks,
+        artists: similarWithSpotify.filter(Boolean),
+        error: null,
+      });
     } catch (e) {
       console.warn("Recommendations error:", e);
-      setRecommendations({ tracks: [], artists: [], error: e.message });
     }
   };
 
@@ -701,9 +724,9 @@ ANECDOTES
                         {recommendations.artists.map(a => (
                           <a
                             key={a.id}
-                            href={a.uri}
+                            href={a.uri || `https://open.spotify.com/search/${encodeURIComponent(a.name)}`}
                             style={styles.recItem}
-                            onClick={e => { e.preventDefault(); window.location.href = a.uri; }}
+                            onClick={e => { e.preventDefault(); window.location.href = a.uri || `https://open.spotify.com/search/${encodeURIComponent(a.name)}`; }}
                           >
                             {a.image
                               ? <img src={a.image} alt="" style={{ ...styles.recThumb, borderRadius: "50%" }} />
