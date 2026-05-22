@@ -449,7 +449,8 @@ ANECDOTES
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
     } catch (e) {
       console.error("generateAiContent error:", e);
-      setAiContent({ bio: "Données indisponibles.", explication: "", anecdotes: [], genre: "—", ambiance: "—" });
+      setQuickInfo({ genre: "ERR: " + e.message?.slice(0,30), ambiance: e.name || "?", playcount: -1 });
+      setAiContent({ bio: "Erreur: " + e.message, explication: "", anecdotes: [], genre: "—", ambiance: "—" });
     }
     setAiLoading(false);
   };
