@@ -600,6 +600,11 @@ ANECDOTES
                     ))}
                   </div>
 
+                  <div style={{ background: "rgba(255,80,80,.12)", border: "1px solid rgba(255,80,80,.3)", borderRadius: 8, padding: "8px 12px", fontSize: 11, lineHeight: 1.8, color: "#f0ede8" }}>
+                    <div>Genre: <b>{quickInfo.genre}</b> | Ambiance: <b>{quickInfo.ambiance}</b></div>
+                    <div>Écoutes: <b>{quickInfo.playcount || "null"}</b></div>
+                    <div>Recs: <b>{recommendations.tracks.length}</b> titres, <b>{recommendations.artists.length}</b> artistes</div>
+                  </div>
                 </>
               ) : (
                 <div style={styles.nothing}>
