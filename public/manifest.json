@@ -1,0 +1,14 @@
+{
+  "name": "SpotiLive",
+  "short_name": "SpotiLive",
+  "description": "Votre lecture Spotify en temps réel",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#1DB954",
+  "icons": [
+    { "src": "/logo-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
+
