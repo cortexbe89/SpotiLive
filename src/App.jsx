@@ -269,6 +269,9 @@ export default function SpotiLive() {
       if (lfmArtist?.stats?.listeners) anecdotes.push(`${Number(lfmArtist.stats.listeners).toLocaleString("fr-BE")} auditeurs uniques sur Last.fm.`);
       if (mbRecording?.releases?.length > 1) anecdotes.push(`Ce titre est apparu sur ${mbRecording.releases.length} sorties différentes selon MusicBrainz.`);
 
+      // Mettre à jour trackStats et artistStats avec les données déjà récupérées
+      setTrackStats({ lastfm: lfmTrack });
+      setArtistStats({ lastfm: lfmArtist });
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
     } catch (e) {
       setAiContent({ bio: "Données indisponibles.", explication: "", anecdotes: [], genre: "—", ambiance: "—" });
@@ -285,8 +288,6 @@ export default function SpotiLive() {
     setCurrent(track);
     if (track.id !== lastTrackRef.current) {
       lastTrackRef.current = track.id;
-      fetchTrackStats(track);
-      fetchArtistStats(track.artists[0]);
       generateAiContent(track);
     }
   }, [spotifyFetch]);
@@ -399,7 +400,6 @@ export default function SpotiLive() {
                   </div>
                   <div style={styles.quickStats}>
                     {[
-                      ["Popularité", current.popularity ? `${current.popularity}/100` : "—"],
                       ["Écoutes", trackStats?.lastfm?.playcount ? fmtNum(trackStats.lastfm.playcount) : "—"],
                       ["Genre", aiContent?.genre || "—"],
                       ["Ambiance", aiContent?.ambiance || "—"],
@@ -410,12 +410,7 @@ export default function SpotiLive() {
                       </div>
                     ))}
                   </div>
-                  {current.popularity > 0 && (
-                    <div style={styles.popWrap}>
-                      <span style={styles.popLabel}>Popularité Spotify</span>
-                      <div style={styles.popBar}><div style={{ ...styles.popFill, width: `${current.popularity}%` }} /></div>
-                    </div>
-                  )}
+
                 </>
               ) : (
                 <div style={styles.nothing}>
@@ -616,7 +611,7 @@ const styles = {
   progressBar: { flex: 1, height: 3, background: "rgba(255,255,255,.12)", borderRadius: 2, overflow: "hidden" },
   progressFill: { height: "100%", background: "linear-gradient(90deg, #1db954, #1ed760)", borderRadius: 2, transition: "width 1s linear" },
   timeLabel: { fontSize: 11, opacity: 0.45, fontVariantNumeric: "tabular-nums" },
-  quickStats: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, width: "100%" },
+  quickStats: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, width: "100%" },
   quickStat: { background: "rgba(255,255,255,.04)", borderRadius: 10, padding: "10px 14px", display: "flex", flexDirection: "column", gap: 3 },
   qsLabel: { fontSize: 10, opacity: 0.4, textTransform: "uppercase", letterSpacing: 1 },
   qsValue: { fontSize: 14, fontWeight: 500 },
