@@ -243,54 +243,37 @@ export default function SpotiLive() {
     if (!currentToken) return;
     try {
       const artistId = track.artists[0].id;
-      const trackId = track.id;
-      // Spotify recommendations endpoint
-      const res = await fetch(
-        `https://api.spotify.com/v1/recommendations?seed_artists=${artistId}&seed_tracks=${trackId}&limit=10&market=BE`,
-        { headers: { Authorization: `Bearer ${currentToken}` } }
-      );
-      const resText = await res.text();
-      if (!res.ok) {
-        // Show error in recommendations area for debug
-        setRecommendations({ tracks: [], artists: [], error: `${res.status}: ${resText.slice(0,100)}` });
-        return;
-      }
-      const data = JSON.parse(resText);
-      const recTracks = data.tracks || [];
-      // Extract unique artists from recommended tracks
-      const artistMap = new Map();
-      recTracks.forEach(t => {
-        t.artists.forEach(a => {
-          if (a.id !== artistId && !artistMap.has(a.id)) {
-            artistMap.set(a.id, { id: a.id, name: a.name, uri: a.uri });
-          }
-        });
-      });
-      const uniqueArtists = Array.from(artistMap.values()).slice(0, 6);
-      // Fetch artist images in one batch call
-      if (uniqueArtists.length > 0) {
-        const artistIds = uniqueArtists.map(a => a.id).join(",");
-        const artistRes = await fetch(
-          `https://api.spotify.com/v1/artists?ids=${artistIds}`,
-          { headers: { Authorization: `Bearer ${currentToken}` } }
-        ).then(r => r.ok ? r.json() : null).catch(() => null);
-        if (artistRes?.artists) {
-          artistRes.artists.forEach((a, i) => {
-            if (a && uniqueArtists[i]) {
-              uniqueArtists[i].image = a.images?.[2]?.url || a.images?.[0]?.url || null;
-              uniqueArtists[i].genres = a.genres || [];
-            }
-          });
-        }
-      }
-      setRecommendations({
-        tracks: recTracks.slice(0, 6),
-        artists: uniqueArtists,
-      });
+      const headers = { Authorization: `Bearer ${currentToken}` };
+
+      // related-artists + top-tracks : deux endpoints encore disponibles
+      const [relatedRes, topTracksRes] = await Promise.all([
+        fetch(`https://api.spotify.com/v1/artists/${artistId}/related-artists`, { headers })
+          .then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`https://api.spotify.com/v1/artists/${artistId}/top-tracks?market=BE`, { headers })
+          .then(r => r.ok ? r.json() : null).catch(() => null),
+      ]);
+
+      // Artistes similaires
+      const relatedArtists = (relatedRes?.artists || []).slice(0, 6).map(a => ({
+        id: a.id,
+        name: a.name,
+        uri: a.uri,
+        image: a.images?.[2]?.url || a.images?.[0]?.url || null,
+        genres: a.genres || [],
+      }));
+
+      // Top tracks de l'artiste (hors track en cours)
+      const topTracks = (topTracksRes?.tracks || [])
+        .filter(t => t.id !== track.id)
+        .slice(0, 6);
+
+      setRecommendations({ tracks: topTracks, artists: relatedArtists, error: null });
     } catch (e) {
       console.warn("Recommendations error:", e);
+      setRecommendations({ tracks: [], artists: [], error: e.message });
     }
   };
+
 
   const generateAiContent = async (track) => {
     setAiContent(null);
@@ -685,15 +668,10 @@ ANECDOTES
                     </div>
                   )}
 
-                  {recommendations.error && (
-                    <div style={{ ...styles.aiBlock, borderColor: "rgba(255,100,100,.3)" }}>
-                      <h3 style={{ ...styles.aiTitle, color: "#ff6b6b" }}>Recs debug</h3>
-                      <p style={{ fontSize: 11, opacity: 0.7, wordBreak: "break-all" }}>{recommendations.error}</p>
-                    </div>
-                  )}
+
                   {recommendations.tracks.length > 0 && (
                     <div style={styles.aiBlock}>
-                      <h3 style={styles.aiTitle}>Titres similaires</h3>
+                      <h3 style={styles.aiTitle}>Top titres · {current?.artists?.[0]?.name}</h3>
                       <div style={styles.recList}>
                         {recommendations.tracks.map(t => (
                           <a
