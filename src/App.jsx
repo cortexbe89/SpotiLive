@@ -95,6 +95,9 @@ export default function SpotiLive() {
   const pollRef = useRef(null);
   const lastTrackRef = useRef(null);
   const progressRef = useRef(null);
+  const swipeRef = useRef(null);
+  const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
 
   const refreshAccessToken = useCallback(async () => {
     const refreshToken = localStorage.getItem("spotify_refresh_token");
@@ -526,6 +529,26 @@ ANECDOTES
   };
 
   const pct = current ? (progress / current.duration_ms) * 100 : 0;
+  const TABS = ["now", "recs", "stats", "history"];
+
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e) => {
+    if (touchStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = Math.abs(e.changedTouches[0].clientY - touchStartY.current);
+    // Only swipe if horizontal movement > 50px and more horizontal than vertical
+    if (Math.abs(dx) > 50 && Math.abs(dx) > dy) {
+      const currentIdx = TABS.indexOf(activeTab);
+      if (dx < 0 && currentIdx < TABS.length - 1) setActiveTab(TABS[currentIdx + 1]);
+      if (dx > 0 && currentIdx > 0) setActiveTab(TABS[currentIdx - 1]);
+    }
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
 
   if (!token) {
     return (
@@ -579,15 +602,23 @@ ANECDOTES
         </div>
       </header>
 
-      <nav style={styles.tabs}>
-        {["now", "recs", "stats", "history"].map(tab => (
-          <button key={tab} style={{ ...styles.tab, ...(activeTab === tab ? styles.tabActive : {}) }} onClick={() => setActiveTab(tab)}>
+      <nav style={styles.tabs} ref={swipeRef}>
+        {TABS.map(tab => (
+          <button
+            key={tab}
+            id={`tab-${tab}`}
+            style={{ ...styles.tab, ...(activeTab === tab ? styles.tabActive : {}) }}
+            onClick={() => {
+              setActiveTab(tab);
+              document.getElementById(`tab-${tab}`)?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+            }}
+          >
             {{ now: "En cours", recs: "Artistes liés", stats: "Statistiques", history: "Historique" }[tab]}
           </button>
         ))}
       </nav>
 
-      <main style={styles.main}>
+      <main style={styles.main} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         {activeTab === "now" && (
           <div style={styles.nowGrid}>
             <div style={styles.playerCol}>
@@ -896,8 +927,10 @@ ANECDOTES
         @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
         html, body, #root { width: 100%; height: 100%; min-height: 100vh; min-height: 100dvh; }
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #535353; border-radius: 2px; }
+        nav::-webkit-scrollbar { display: none; }
         button:hover { opacity: .85; }
         a:hover { opacity: .85; }
+        .swipe-hint { animation: fadeIn .3s ease; }
       `}</style>
     </div>
   );
@@ -917,7 +950,7 @@ const styles = {
   btnIcon: { background: "#282828", border: "none", color: "#b3b3b3", cursor: "pointer", width: 34, height: 34, borderRadius: "50%", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", transition: "background .2s" },
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
-  tabs: { position: "relative", zIndex: 10, display: "flex", gap: 0, padding: "0 20px", background: "rgba(18,18,18,.6)", backdropFilter: "blur(24px)", borderBottom: "1px solid rgba(255,255,255,.08)", overflowX: "auto" },
+  tabs: { position: "sticky", top: 0, zIndex: 20, display: "flex", gap: 0, padding: "0 12px", background: "rgba(18,18,18,.95)", backdropFilter: "blur(24px)", borderBottom: "1px solid rgba(255,255,255,.08)", overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" },
   tab: { background: "none", border: "none", borderBottom: "2px solid transparent", color: "#b3b3b3", cursor: "pointer", fontSize: 13, fontWeight: 600, padding: "14px 16px", fontFamily: "'Nunito Sans', sans-serif", letterSpacing: "0.3px", whiteSpace: "nowrap", transition: "color .2s" },
   tabActive: { color: "#fff", borderBottom: "2px solid #1db954" },
 
