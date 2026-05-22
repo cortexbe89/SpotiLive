@@ -315,8 +315,8 @@ export default function SpotiLive() {
       setTrackStats({ lastfm: lfmTrack });
       setArtistStats({ lastfm: lfmArtist });
       setQuickInfo({
-        genre: genre,
-        ambiance: ambiance,
+        genre: genre + (spotifyArtistRes ? " [S✓]" : " [S✗]") + (lfmArtist ? "[L✓]" : "[L✗]"),
+        ambiance: ambiance || ("tags:" + (lfmArtist?.tags?.tag?.length || 0)),
         playcount: lfmTrack?.playcount || null,
       });
 
