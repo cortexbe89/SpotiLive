@@ -214,37 +214,78 @@ export default function SpotiLive() {
     if (topArt?.items) setTopArtists(topArt.items);
   }, [spotifyFetch]);
 
-  // ── AI Content via Claude ──────────────────────────────────────────────────
+  // ── Traduction MyMemory (gratuit, sans clé) ──────────────────────────────
+  const translateToFr = async (text) => {
+    if (!text || text.length < 10) return text;
+    const frenchPattern = /[àâäéèêëîïôöùûüçœæ]/i;
+    if (frenchPattern.test(text)) return text;
+    try {
+      const res = await fetch(
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=en|fr`
+      );
+      const data = await res.json();
+      if (data.responseStatus === 200 && data.responseData?.translatedText) {
+        return data.responseData.translatedText;
+      }
+    } catch {}
+    return text;
+  };
+
+  // ── Enrichissement via Last.fm + MusicBrainz (gratuit, sans clé) ────────────
   const generateAiContent = async (track) => {
     setAiContent(null);
     setAiLoading(true);
     try {
-      const prompt = `Tu es un expert musical francophone. Pour la chanson "${track.name}" de ${track.artists.map(a => a.name).join(", ")} (album: ${track.album.name}, ${track.album.release_date?.slice(0,4) || ""}), réponds UNIQUEMENT en JSON valide avec ces clés exactes:
-{
-  "bio": "Biographie de l'artiste principal en 3-4 phrases percutantes en français",
-  "explication": "Explication de la chanson: contexte, thèmes, signification des paroles en 3-4 phrases en français",
-  "anecdotes": ["anecdote 1 fascinante en français", "anecdote 2 fascinante en français", "anecdote 3 fascinante en français"],
-  "genre": "Genre musical principal",
-  "ambiance": "Ambiance en 3 mots max"
-}
-Sois précis, factuel, et évite les généralités. Si tu n'es pas sûr d'une anecdote, ne l'invente pas.`;
+      const artistName = track.artists[0].name;
+      const trackName = track.name;
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      const data = await res.json();
-      const text = data.content?.find(b => b.type === "text")?.text || "";
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
-      setAiContent(parsed);
+      const [lfmArtist, lfmTrack] = await Promise.all([
+        lastfmKey
+          ? lastfmFetch({ method: "artist.getInfo", api_key: lastfmKey, artist: artistName, lang: "fr" })
+          : fetch(`https://ws.audioscrobbler.com/2.0/?method=artist.getInfo&artist=${encodeURIComponent(artistName)}&lang=fr&api_key=43a8dd6083e2571bf6e47c5d88a88a7f&format=json`).then(r=>r.json()),
+        lastfmKey
+          ? lastfmFetch({ method: "track.getInfo", api_key: lastfmKey, artist: artistName, track: trackName })
+          : fetch(`https://ws.audioscrobbler.com/2.0/?method=track.getInfo&artist=${encodeURIComponent(artistName)}&track=${encodeURIComponent(trackName)}&api_key=43a8dd6083e2571bf6e47c5d88a88a7f&format=json`).then(r=>r.json()),
+      ]);
+
+      const mbRes = await fetch(
+        `https://musicbrainz.org/ws/2/recording/?query=recording:"${encodeURIComponent(trackName)}" AND artist:"${encodeURIComponent(artistName)}"&limit=1&fmt=json`,
+        { headers: { "User-Agent": "SpotiLive/1.0 (https://spotilive.netlify.app)" } }
+      );
+      const mbData = await mbRes.json();
+      const mbRecording = mbData?.recordings?.[0];
+
+      let bio = lfmArtist?.artist?.bio?.summary || "";
+      bio = bio.replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+      bio = bio.split(".").slice(0, 4).join(".").trim();
+      if (bio) bio = await translateToFr(bio);
+      if (!bio) bio = "Biographie non disponible pour cet artiste.";
+
+      const tags = lfmArtist?.artist?.tags?.tag?.map(t => t.name) || [];
+      const genre = tags[0] || lfmTrack?.track?.toptags?.tag?.[0]?.name || "—";
+      const ambiance = tags.slice(1, 3).join(", ") || "—";
+
+      let explication = lfmTrack?.track?.wiki?.summary || lfmArtist?.artist?.bio?.content || "";
+      explication = explication.replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+      explication = explication.split(".").slice(0, 3).join(".").trim();
+      if (explication) explication = await translateToFr(explication);
+      if (!explication) {
+        const yr = track.album.release_date?.slice(0, 4);
+        explication = `"${trackName}" est un titre de ${artistName}${yr ? `, sorti en ${yr}` : ""}, extrait de l'album "${track.album.name}".`;
+      }
+
+      const anecdotes = [];
+      if (mbRecording) {
+        if (mbRecording.length) anecdotes.push(`Durée officielle : ${Math.floor(mbRecording.length/60000)}m${String(Math.floor((mbRecording.length%60000)/1000)).padStart(2,"0")}s.`);
+        if (mbRecording.releases?.[0]?.date) anecdotes.push(`Date de sortie officielle : ${mbRecording.releases[0].date}.`);
+        if (mbRecording.releases?.[0]?.country) anecdotes.push(`Pays de sortie : ${mbRecording.releases[0].country}.`);
+      }
+      if (lfmTrack?.track?.playcount) anecdotes.push(`Ce titre totalise ${Number(lfmTrack.track.playcount).toLocaleString("fr-BE")} écoutes sur Last.fm.`);
+      if (lfmArtist?.artist?.stats?.listeners) anecdotes.push(`${Number(lfmArtist.artist.stats.listeners).toLocaleString("fr-BE")} auditeurs uniques sur Last.fm.`);
+
+      setAiContent({ bio, explication, anecdotes, genre, ambiance });
     } catch (e) {
-      setAiContent({ bio: "Contenu indisponible.", explication: "", anecdotes: [], genre: "—", ambiance: "—" });
+      setAiContent({ bio: "Données indisponibles.", explication: "", anecdotes: [], genre: "—", ambiance: "—" });
     }
     setAiLoading(false);
   };
@@ -655,7 +696,7 @@ const styles = {
   header: {
     position: "relative", zIndex: 10,
     display: "flex", alignItems: "center", justifyContent: "space-between",
-    padding: "18px 28px",
+    padding: "14px 16px",
     borderBottom: "1px solid rgba(255,255,255,.06)",
     backdropFilter: "blur(20px)",
   },
@@ -696,21 +737,25 @@ const styles = {
   },
   main: {
     position: "relative", zIndex: 10,
-    padding: "24px 28px",
+    padding: "16px",
     maxWidth: 1200, margin: "0 auto",
   },
   // NOW PLAYING
   nowGrid: {
-    display: "grid",
-    gridTemplateColumns: "340px 1fr",
-    gap: 28,
+    display: "flex",
+    flexDirection: "column",
+    gap: 20,
+    maxWidth: 600,
+    margin: "0 auto",
+    width: "100%",
   },
   playerCol: {
-    display: "flex", flexDirection: "column", gap: 20,
+    display: "flex", flexDirection: "column", gap: 16,
+    alignItems: "center",
   },
   albumWrap: {
     position: "relative", alignSelf: "center",
-    width: 260, height: 260,
+    width: 220, height: 220,
   },
   albumArt: {
     width: "100%", height: "100%",
@@ -725,7 +770,7 @@ const styles = {
     animation: "ring 2s ease-out infinite",
     zIndex: 1,
   },
-  trackInfo: { textAlign: "center" },
+  trackInfo: { textAlign: "center", width: "100%" },
   trackName: {
     fontFamily: "'Fraunces', serif",
     fontSize: 22, fontWeight: 600,
@@ -735,6 +780,7 @@ const styles = {
   albumName: { fontSize: 12, opacity: 0.45 },
   progressWrap: {
     display: "flex", alignItems: "center", gap: 8,
+    width: "100%",
   },
   progressBar: {
     flex: 1, height: 3,
@@ -750,7 +796,7 @@ const styles = {
   timeLabel: { fontSize: 11, opacity: 0.45, fontVariantNumeric: "tabular-nums" },
   quickStats: {
     display: "grid", gridTemplateColumns: "1fr 1fr",
-    gap: 8,
+    gap: 8, width: "100%",
   },
   quickStat: {
     background: "rgba(255,255,255,.04)",
@@ -778,8 +824,8 @@ const styles = {
   nothingIcon: { fontSize: 48 },
   // AI COL
   aiCol: {
-    display: "flex", flexDirection: "column", gap: 16,
-    overflowY: "auto", maxHeight: "calc(100vh - 180px)",
+    display: "flex", flexDirection: "column", gap: 14,
+    width: "100%",
   },
   aiLoading: {
     display: "flex", flexDirection: "column", alignItems: "center",
