@@ -215,27 +215,44 @@ export default function SpotiLive() {
     if (topArt?.items) setTopArtists(topArt.items);
   }, [spotifyFetch]);
 
-  // ── Gemini : bio + explication en français ───────────────────────────────
+  // ── Gemini : bio + explication enrichies en français ────────────────────
   const geminiEnrich = async (track, lfmArtist, lfmTrack) => {
     const artistName = track.artists[0].name;
     const trackName = track.name;
     const yr = track.album.release_date?.slice(0, 4) || "";
+    const albumName = track.album.name;
     const tags = lfmArtist?.artist?.tags?.tag?.map(t => t.name).join(", ") || "";
-    const playcount = lfmTrack?.track?.playcount || "";
+    const playcount = lfmTrack?.track?.playcount ? Number(lfmTrack.track.playcount).toLocaleString("fr-BE") : "";
+    const listeners = lfmArtist?.artist?.stats?.listeners ? Number(lfmArtist.artist.stats.listeners).toLocaleString("fr-BE") : "";
+    const lfmWiki = lfmTrack?.track?.wiki?.summary || "";
+    const lfmBio = lfmArtist?.artist?.bio?.summary || "";
 
-    const prompt = `Tu es un expert musical francophone. Réponds UNIQUEMENT en JSON valide, sans balises markdown.
-Artiste: ${artistName}
-Chanson: "${trackName}"
-Album: ${track.album.name} (${yr})
-Tags Last.fm: ${tags}
-Écoutes Last.fm: ${playcount}
+    const prompt = `Tu es un expert musical francophone passionné. Tu DOIS répondre UNIQUEMENT en JSON valide, sans balises markdown, sans texte avant ou après le JSON.
+TOUTES les valeurs doivent être en FRANÇAIS, sans exception. Jamais un mot en anglais dans ta réponse.
 
-JSON attendu (clés exactes):
+Informations disponibles:
+- Artiste: ${artistName}
+- Chanson: "${trackName}"
+- Album: ${albumName} (${yr})
+- Tags Last.fm: ${tags || "non disponibles"}
+- Écoutes Last.fm: ${playcount || "non disponibles"}
+- Auditeurs Last.fm: ${listeners || "non disponibles"}
+- Bio Last.fm (peut être en anglais, à traduire): ${lfmBio.slice(0, 300) || "non disponible"}
+- Wiki chanson Last.fm (peut être en anglais, à traduire): ${lfmWiki.slice(0, 300) || "non disponible"}
+
+Consignes STRICTES:
+- Écris des paragraphes riches, détaillés et passionnants. Sois généreux en contenu.
+- La bio doit couvrir: origines de l'artiste, style musical, influences, carrière, albums notables, anecdotes marquantes.
+- L'explication doit couvrir: contexte de création, thèmes lyriques, ambiance sonore, place dans la discographie, réception critique si connue.
+- Si tu ne connais pas précisément cet artiste ou cette chanson, extrapole intelligemment à partir du genre, de l'époque et du style — mais reste plausible.
+- Genre et ambiance OBLIGATOIRES même si les tags sont absents.
+
+JSON attendu (TOUT en français, phrases complètes et bien terminées):
 {
-  "bio": "Biographie de l'artiste en 3-4 phrases en français. Sois factuel et précis.",
-  "explication": "Contexte et signification de cette chanson spécifique en 3-4 phrases en français. Si tu n'as pas d'info précise sur cette chanson, décris son style et son époque.",
-  "genre": "Genre musical principal en 1-3 mots",
-  "ambiance": "Ambiance en 2-3 mots max"
+  "bio": "Biographie complète et enthousiaste de l'artiste en 5-6 phrases en français.",
+  "explication": "Explication riche et détaillée de cette chanson spécifique en 4-5 phrases en français.",
+  "genre": "Genre musical en français (ex: house music, jazz contemporain, pop électronique)",
+  "ambiance": "Ambiance en 3 mots français maximum"
 }`;
 
     const res = await fetch(
@@ -245,7 +262,7 @@ JSON attendu (clés exactes):
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 800 },
+          generationConfig: { temperature: 0.5, maxOutputTokens: 1200 },
         }),
       }
     );
@@ -263,55 +280,44 @@ JSON attendu (clés exactes):
       const artistName = track.artists[0].name;
       const trackName = track.name;
 
-      const [lfmArtist, lfmTrack] = await Promise.all([
+      // Last.fm en parallèle avec MusicBrainz
+      const [lfmArtist, lfmTrack, mbRes] = await Promise.all([
         lastfmKey
           ? lastfmFetch({ method: "artist.getInfo", api_key: lastfmKey, artist: artistName, lang: "fr" })
           : fetch(`https://ws.audioscrobbler.com/2.0/?method=artist.getInfo&artist=${encodeURIComponent(artistName)}&lang=fr&api_key=43a8dd6083e2571bf6e47c5d88a88a7f&format=json`).then(r=>r.json()),
         lastfmKey
           ? lastfmFetch({ method: "track.getInfo", api_key: lastfmKey, artist: artistName, track: trackName })
           : fetch(`https://ws.audioscrobbler.com/2.0/?method=track.getInfo&artist=${encodeURIComponent(artistName)}&track=${encodeURIComponent(trackName)}&api_key=43a8dd6083e2571bf6e47c5d88a88a7f&format=json`).then(r=>r.json()),
+        fetch(
+          `https://musicbrainz.org/ws/2/recording/?query=recording:"${encodeURIComponent(trackName)}" AND artist:"${encodeURIComponent(artistName)}"&limit=1&fmt=json`,
+          { headers: { "User-Agent": "SpotiLive/1.0 (https://spotilive.netlify.app)" } }
+        ).then(r=>r.json()).catch(()=>({})),
       ]);
 
-      // MusicBrainz pour les anecdotes factuelles
-      const mbRes = await fetch(
-        `https://musicbrainz.org/ws/2/recording/?query=recording:"${encodeURIComponent(trackName)}" AND artist:"${encodeURIComponent(artistName)}"&limit=1&fmt=json`,
-        { headers: { "User-Agent": "SpotiLive/1.0 (https://spotilive.netlify.app)" } }
-      );
-      const mbData = await mbRes.json();
-      const mbRecording = mbData?.recordings?.[0];
+      const mbRecording = mbRes?.recordings?.[0];
 
-      // Gemini génère bio + explication en français
+      // Gemini TOUJOURS appelé en premier — il a toutes les infos nécessaires
       let gemini = null;
-      try { gemini = await geminiEnrich(track, lfmArtist, lfmTrack); } catch {}
+      try { gemini = await geminiEnrich(track, lfmArtist, lfmTrack); } catch (e) { console.warn("Gemini error:", e); }
 
       // Tags Last.fm
       const tags = lfmArtist?.artist?.tags?.tag?.map(t => t.name) || [];
+
+      // Genre : Gemini en priorité (toujours présent), sinon Last.fm
       const genre = gemini?.genre || tags[0] || lfmTrack?.track?.toptags?.tag?.[0]?.name || "—";
+
+      // Ambiance : Gemini en priorité
       const ambiance = gemini?.ambiance || tags.slice(1, 3).join(", ") || "—";
 
-      // Bio : Gemini en priorité, sinon Last.fm nettoyé
-      let bio = gemini?.bio || "";
-      if (!bio) {
-        bio = lfmArtist?.artist?.bio?.summary || "";
-        bio = bio.replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-        bio = bio.split(".").slice(0, 4).join(".").trim();
-      }
-      if (!bio) bio = "Biographie non disponible pour cet artiste.";
+      // Bio : Gemini en priorité
+      const bio = gemini?.bio || "Biographie non disponible pour cet artiste.";
 
-      // Explication : Gemini en priorité, sinon fiche factuelle
-      let explication = gemini?.explication || "";
-      if (!explication) {
-        explication = lfmTrack?.track?.wiki?.summary || "";
-        explication = explication.replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-        explication = explication.split(".").slice(0, 3).join(".").trim();
-      }
-      if (!explication) {
+      // Explication : Gemini en priorité
+      const explication = gemini?.explication || (() => {
         const yr = track.album.release_date?.slice(0, 4);
         const dur = track.duration_ms ? `${Math.floor(track.duration_ms/60000)}m${String(Math.floor((track.duration_ms%60000)/1000)).padStart(2,"0")}s` : null;
-        const parts = [`"${trackName}" est un titre de ${artistName}, extrait de l'album "${track.album.name}"${yr ? ` (${yr})` : ""}.`];
-        if (dur) parts.push(`La chanson dure ${dur}.`);
-        explication = parts.join(" ");
-      }
+        return `"${trackName}" est un titre de ${artistName}, extrait de l'album "${track.album.name}"${yr ? ` (${yr})` : ""}${dur ? `. La chanson dure ${dur}` : ""}.`;
+      })();
 
       // Anecdotes factuelles MusicBrainz + Last.fm
       const anecdotes = [];
@@ -323,6 +329,7 @@ JSON attendu (clés exactes):
 
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
     } catch (e) {
+      console.error("generateAiContent error:", e);
       setAiContent({ bio: "Données indisponibles.", explication: "", anecdotes: [], genre: "—", ambiance: "—" });
     }
     setAiLoading(false);
