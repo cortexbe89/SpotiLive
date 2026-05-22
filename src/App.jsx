@@ -88,7 +88,7 @@ export default function SpotiLive() {
 
   const [aiContent, setAiContent] = useState(null);
   const [quickInfo, setQuickInfo] = useState({ genre: "—", ambiance: "—", playcount: null });
-  const [recommendations, setRecommendations] = useState({ tracks: [], artists: [], error: null });
+  const [recommendations, setRecommendations] = useState({ artists: [], error: null });
   const [aiLoading, setAiLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState("now");
@@ -211,17 +211,27 @@ export default function SpotiLive() {
     return res.json();
   }, [token, refreshAccessToken]);
 
+  const [lfmTopTracks, setLfmTopTracks] = useState([]);
+  const [lfmTopArtists, setLfmTopArtists] = useState([]);
+  const [lfmTopAlbums, setLfmTopAlbums] = useState([]);
+
   const fetchLastfmStats = useCallback(async () => {
     if (!lastfmUser) return;
     const key = LASTFM_KEY;
     try {
-      const [profile, recent] = await Promise.all([
+      const [profile, recent, topTr, topArt, topAlb] = await Promise.all([
         lastfmFetch({ method: "user.getInfo", api_key: key, user: lastfmUser }),
         lastfmFetch({ method: "user.getRecentTracks", api_key: key, user: lastfmUser, limit: 10 }),
+        lastfmFetch({ method: "user.getTopTracks", api_key: key, user: lastfmUser, period: "1month", limit: 10 }),
+        lastfmFetch({ method: "user.getTopArtists", api_key: key, user: lastfmUser, period: "1month", limit: 10 }),
+        lastfmFetch({ method: "user.getTopAlbums", api_key: key, user: lastfmUser, period: "1month", limit: 5 }),
       ]);
       setLastfmProfile(profile?.user);
       const tracks = recent?.recenttracks?.track || [];
       setRecentTracks(Array.isArray(tracks) ? tracks.slice(0, 10) : [tracks]);
+      setLfmTopTracks(topTr?.toptracks?.track || []);
+      setLfmTopArtists(topArt?.topartists?.artist || []);
+      setLfmTopAlbums(topAlb?.topalbums?.album || []);
     } catch {}
   }, [lastfmUser]);
 
@@ -238,54 +248,22 @@ export default function SpotiLive() {
     const currentToken = sessionStorage.getItem("spotify_token");
     if (!currentToken) return;
     try {
-      const artistId = track.artists[0].id;
       const artistName = track.artists[0].name;
-      const trackName = track.name;
       const headers = { Authorization: `Bearer ${currentToken}` };
 
-      // Titres similaires Last.fm + Artistes similaires Last.fm en parallèle
-      const [similarTracksRes, similarArtistsRes] = await Promise.all([
-        lastfmFetch({ method: "track.getSimilar", api_key: LASTFM_KEY, artist: artistName, track: trackName, limit: 8 }).catch(() => null),
-        lastfmFetch({ method: "artist.getSimilar", api_key: LASTFM_KEY, artist: artistName, limit: 6 }).catch(() => null),
-      ]);
+      // Artistes similaires via Last.fm (10 propositions)
+      const similarRes = await lastfmFetch({
+        method: "artist.getSimilar",
+        api_key: LASTFM_KEY,
+        artist: artistName,
+        limit: 12,
+      }).catch(() => null);
 
-      // Titres similaires → Last.fm d'abord, fallback sur top-tracks Spotify
-      const similarTracks = similarTracksRes?.similartracks?.track || [];
-      let recTracks = [];
+      const similarNames = (similarRes?.similarartists?.artist || []).map(a => a.name);
 
-      if (similarTracks.length > 0) {
-        // Last.fm a trouvé des titres similaires → les résoudre sur Spotify
-        const resolved = await Promise.all(
-          similarTracks.slice(0, 8).map(async t => {
-            try {
-              const res = await fetch(
-                `https://api.spotify.com/v1/search?q=track:${encodeURIComponent(t.name)}+artist:${encodeURIComponent(t.artist?.name || artistName)}&type=track&limit=1&market=BE`,
-                { headers }
-              ).then(r => r.ok ? r.json() : null);
-              const item = res?.tracks?.items?.[0];
-              if (item) return { id: item.id, name: item.name, uri: item.uri, album: item.album, artists: item.artists };
-            } catch {}
-            return null;
-          })
-        );
-        recTracks = resolved.filter(Boolean).slice(0, 6);
-      }
-
-      if (recTracks.length === 0) {
-        // Fallback : top-tracks de l'artiste (hors titre en cours)
-        const topRes = await fetch(
-          `https://api.spotify.com/v1/artists/${artistId}/top-tracks?market=BE`,
-          { headers }
-        ).then(r => r.ok ? r.json() : null).catch(() => null);
-        recTracks = (topRes?.tracks || [])
-          .filter(t => t.id !== track.id)
-          .slice(0, 6);
-      }
-
-      // Artistes similaires → recherche Spotify pour photo + URI
-      const similarArtistNames = (similarArtistsRes?.similarartists?.artist || []).slice(0, 6).map(a => a.name);
+      // Résoudre sur Spotify pour photos + liens
       const recArtists = await Promise.all(
-        similarArtistNames.map(async name => {
+        similarNames.slice(0, 10).map(async name => {
           try {
             const res = await fetch(
               `https://api.spotify.com/v1/search?q=${encodeURIComponent(name)}&type=artist&limit=1&market=BE`,
@@ -294,16 +272,16 @@ export default function SpotiLive() {
             const artist = res?.artists?.items?.[0];
             if (artist) return {
               id: artist.id, name: artist.name, uri: artist.uri,
-              image: artist.images?.[2]?.url || artist.images?.[0]?.url || null,
+              image: artist.images?.[1]?.url || artist.images?.[0]?.url || null,
               genres: artist.genres?.slice(0, 1) || [],
+              popularity: artist.popularity || 0,
             };
           } catch {}
-          return { id: name, name, uri: null, image: null, genres: [] };
+          return { id: name, name, uri: null, image: null, genres: [], popularity: 0 };
         })
       );
 
       setRecommendations({
-        tracks: recTracks.filter(Boolean),
         artists: recArtists.filter(Boolean),
         error: null,
       });
@@ -316,7 +294,7 @@ export default function SpotiLive() {
     setAiContent(null);
     setAiLoading(true);
     setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
-    setRecommendations({ tracks: [], artists: [], error: null });
+    setRecommendations({ artists: [], error: null });
     try {
       const artistName = track.artists[0].name;
       const trackName = track.name;
@@ -543,7 +521,7 @@ ANECDOTES
     sessionStorage.removeItem("spotify_token");
     localStorage.removeItem("spotify_refresh_token");
     localStorage.removeItem("spotify_expires_at");
-    setCurrent(null); setAiContent(null); setTrackStats(null); setArtistStats(null); setRecommendations({ tracks: [], artists: [], error: null });
+    setCurrent(null); setAiContent(null); setTrackStats(null); setArtistStats(null); setRecommendations({ artists: [], error: null });
     setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
   };
 
@@ -602,9 +580,9 @@ ANECDOTES
       </header>
 
       <nav style={styles.tabs}>
-        {["now", "stats", "history"].map(tab => (
+        {["now", "recs", "stats", "history"].map(tab => (
           <button key={tab} style={{ ...styles.tab, ...(activeTab === tab ? styles.tabActive : {}) }} onClick={() => setActiveTab(tab)}>
-            {{ now: "En cours", stats: "Statistiques", history: "Historique" }[tab]}
+            {{ now: "En cours", recs: "Artistes", stats: "Statistiques", history: "Historique" }[tab]}
           </button>
         ))}
       </nav>
@@ -705,58 +683,7 @@ ANECDOTES
                   )}
 
 
-                  {recommendations.tracks.length > 0 && (
-                    <div style={styles.aiBlock}>
-                      <h3 style={styles.aiTitle}>Titres similaires</h3>
-                      <div style={styles.recList}>
-                        {recommendations.tracks.map(t => (
-                          <a
-                            key={t.id}
-                            href={`https://open.spotify.com/track/${t.id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={styles.recItem}
-                          >
-                            {t.album?.images?.[2]?.url && (
-                              <img src={t.album.images[2].url} alt="" style={styles.recThumb} />
-                            )}
-                            <div style={styles.recInfo}>
-                              <span style={styles.recTitle}>{t.name}</span>
-                              <span style={styles.recSub}>{t.artists.map(a => a.name).join(", ")}</span>
-                            </div>
-                            <span style={styles.recArrow}>▶</span>
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  )}
 
-                  {recommendations.artists.length > 0 && (
-                    <div style={styles.aiBlock}>
-                      <h3 style={styles.aiTitle}>Artistes similaires</h3>
-                      <div style={styles.recList}>
-                        {recommendations.artists.filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i).map(a => (
-                          <a
-                            key={a.id}
-                            href={a.uri ? `https://open.spotify.com/artist/${a.id}` : `https://open.spotify.com/search/${encodeURIComponent(a.name)}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={styles.recItem}
-                          >
-                            {a.image
-                              ? <img src={a.image} alt="" style={{ ...styles.recThumb, borderRadius: "50%" }} />
-                              : <div style={{ ...styles.recThumb, borderRadius: "50%", background: "rgba(29,185,84,.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🎤</div>
-                            }
-                            <div style={styles.recInfo}>
-                              <span style={styles.recTitle}>{a.name}</span>
-                              {a.genres?.[0] && <span style={styles.recSub}>{a.genres[0]}</span>}
-                            </div>
-                            <span style={styles.recArrow}>▶</span>
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </>
               ) : current ? null : (
                 <div style={styles.aiPlaceholder}><p>Les informations apparaîtront ici</p></div>
@@ -765,25 +692,122 @@ ANECDOTES
           </div>
         )}
 
+        {activeTab === "recs" && (
+          <div style={styles.recsWrap}>
+            {recommendations.artists.length === 0 ? (
+              <div style={styles.aiPlaceholder}>
+                <p>{current ? "Chargement des artistes similaires…" : "Lancez une musique sur Spotify"}</p>
+              </div>
+            ) : (
+              <>
+                <p style={{ fontSize: 11, opacity: 0.35, marginBottom: 16 }}>
+                  Artistes similaires à {current?.artists?.[0]?.name}
+                </p>
+                <div style={styles.recsGrid}>
+                  {recommendations.artists
+                    .filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i)
+                    .map(a => (
+                    <a
+                      key={a.id}
+                      href={a.uri ? `https://open.spotify.com/artist/${a.id}` : `https://open.spotify.com/search/${encodeURIComponent(a.name)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={styles.recCardLink}
+                    >
+                      <div style={styles.recCard}>
+                        {a.image
+                          ? <img src={a.image} alt={a.name} style={styles.recCardImg} />
+                          : <div style={styles.recCardImgPlaceholder}>🎤</div>
+                        }
+                        <div style={styles.recCardInfo}>
+                          <span style={styles.recCardName}>{a.name}</span>
+                          {a.genres?.[0] && <span style={styles.recCardGenre}>{a.genres[0]}</span>}
+                        </div>
+                        <span style={styles.recArrow}>▶</span>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {activeTab === "stats" && (
           <div style={styles.statsGrid}>
             {lastfmProfile && (
               <div style={styles.statCard}>
-                <h3 style={styles.cardTitle}>📻 Profil Last.fm</h3>
+                <h3 style={styles.cardTitle}>📻 Profil Last.fm · {lastfmProfile.name}</h3>
                 <div style={styles.profileRow}>
                   {lastfmProfile.image?.[2]?.["#text"] && <img src={lastfmProfile.image[2]["#text"]} alt="Avatar" style={styles.avatar} />}
                   <div>
                     <p style={styles.profileName}>{lastfmProfile.name}</p>
                     <p style={styles.profileSub}>{fmtNum(lastfmProfile.playcount)} écoutes au total</p>
+                    <p style={styles.profileSub}>{fmtNum(lastfmProfile.artist_count)} artistes différents</p>
+                    <p style={styles.profileSub}>{fmtNum(lastfmProfile.track_count)} titres différents</p>
                     <p style={styles.profileSub}>Membre depuis {new Date(lastfmProfile.registered?.unixtime * 1000).getFullYear()}</p>
                     {lastfmProfile.country && <p style={styles.profileSub}>📍 {lastfmProfile.country}</p>}
                   </div>
                 </div>
               </div>
             )}
+
+            {lfmTopArtists.length > 0 && (
+              <div style={styles.statCard}>
+                <h3 style={styles.cardTitle}>🎤 Top artistes · 30 jours · Last.fm</h3>
+                <ol style={styles.rankList}>
+                  {lfmTopArtists.map((a, i) => (
+                    <li key={a.name} style={styles.rankItem}>
+                      <span style={styles.rankNum}>{i + 1}</span>
+                      <div style={styles.rankInfo}>
+                        <span style={styles.rankTitle}>{a.name}</span>
+                        <span style={styles.rankSub}>{fmtNum(a.playcount)} écoutes</span>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {lfmTopTracks.length > 0 && (
+              <div style={styles.statCard}>
+                <h3 style={styles.cardTitle}>🔥 Top titres · 30 jours · Last.fm</h3>
+                <ol style={styles.rankList}>
+                  {lfmTopTracks.map((t, i) => (
+                    <li key={t.name + t.artist?.name} style={styles.rankItem}>
+                      <span style={styles.rankNum}>{i + 1}</span>
+                      {t.image?.[1]?.["#text"] && <img src={t.image[1]["#text"]} alt="" style={styles.rankThumb} />}
+                      <div style={styles.rankInfo}>
+                        <span style={styles.rankTitle}>{t.name}</span>
+                        <span style={styles.rankSub}>{t.artist?.name} · {fmtNum(t.playcount)} écoutes</span>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {lfmTopAlbums.length > 0 && (
+              <div style={styles.statCard}>
+                <h3 style={styles.cardTitle}>💿 Top albums · 30 jours · Last.fm</h3>
+                <ol style={styles.rankList}>
+                  {lfmTopAlbums.map((a, i) => (
+                    <li key={a.name + a.artist?.name} style={styles.rankItem}>
+                      <span style={styles.rankNum}>{i + 1}</span>
+                      {a.image?.[1]?.["#text"] && <img src={a.image[1]["#text"]} alt="" style={styles.rankThumb} />}
+                      <div style={styles.rankInfo}>
+                        <span style={styles.rankTitle}>{a.name}</span>
+                        <span style={styles.rankSub}>{a.artist?.name} · {fmtNum(a.playcount)} écoutes</span>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
             {topTracks.length > 0 && (
               <div style={styles.statCard}>
-                <h3 style={styles.cardTitle}>🔥 Top titres · 4 semaines</h3>
+                <h3 style={styles.cardTitle}>🎵 Top titres · 4 semaines · Spotify</h3>
                 <ol style={styles.rankList}>
                   {topTracks.map((t, i) => (
                     <li key={t.id} style={styles.rankItem}>
@@ -799,9 +823,10 @@ ANECDOTES
                 </ol>
               </div>
             )}
+
             {topArtists.length > 0 && (
               <div style={styles.statCard}>
-                <h3 style={styles.cardTitle}>⭐ Top artistes · 4 semaines</h3>
+                <h3 style={styles.cardTitle}>⭐ Top artistes · 4 semaines · Spotify</h3>
                 <div style={styles.artistsGrid}>
                   {topArtists.map((a, i) => (
                     <div key={a.id} style={styles.artistChip}>
@@ -931,6 +956,15 @@ const styles = {
   recTitle: { display: "block", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   recSub: { display: "block", fontSize: 11, opacity: 0.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   recArrow: { fontSize: 10, opacity: 0.3, flexShrink: 0, color: "#1db954" },
+  recsWrap: { maxWidth: "min(600px, 100%)", margin: "0 auto", width: "100%" },
+  recsGrid: { display: "flex", flexDirection: "column", gap: 2 },
+  recCardLink: { textDecoration: "none", color: "#f0ede8" },
+  recCard: { display: "flex", alignItems: "center", gap: 14, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,.05)" },
+  recCardImg: { width: 52, height: 52, borderRadius: "50%", flexShrink: 0, objectFit: "cover" },
+  recCardImgPlaceholder: { width: 52, height: 52, borderRadius: "50%", background: "rgba(29,185,84,.12)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 },
+  recCardInfo: { flex: 1, minWidth: 0 },
+  recCardName: { display: "block", fontSize: 15, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  recCardGenre: { display: "block", fontSize: 11, opacity: 0.4, marginTop: 2 },
   statsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20 },
   statCard: { background: "rgba(255,255,255,.04)", borderRadius: 16, padding: "20px", border: "1px solid rgba(255,255,255,.06)" },
   cardTitle: { fontSize: 13, fontWeight: 400, marginBottom: 16, opacity: 0.7, fontFamily: "'Fraunces', serif" },
