@@ -246,10 +246,13 @@ export default function SpotiLive() {
       const trackId = track.id;
       // Spotify recommendations endpoint
       const res = await fetch(
-        `https://api.spotify.com/v1/recommendations?seed_artists=${artistId}&seed_tracks=${trackId}&limit=10`,
+        `https://api.spotify.com/v1/recommendations?seed_artists=${artistId}&seed_tracks=${trackId}&limit=10&market=FR`,
         { headers: { Authorization: `Bearer ${currentToken}` } }
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        console.warn("Recs failed:", res.status, await res.text().catch(() => ""));
+        return;
+      }
       const data = await res.json();
       const recTracks = data.tracks || [];
       // Extract unique artists from recommended tracks
@@ -261,9 +264,26 @@ export default function SpotiLive() {
           }
         });
       });
+      const uniqueArtists = Array.from(artistMap.values()).slice(0, 6);
+      // Fetch artist images in one batch call
+      if (uniqueArtists.length > 0) {
+        const artistIds = uniqueArtists.map(a => a.id).join(",");
+        const artistRes = await fetch(
+          `https://api.spotify.com/v1/artists?ids=${artistIds}`,
+          { headers: { Authorization: `Bearer ${currentToken}` } }
+        ).then(r => r.ok ? r.json() : null).catch(() => null);
+        if (artistRes?.artists) {
+          artistRes.artists.forEach((a, i) => {
+            if (a && uniqueArtists[i]) {
+              uniqueArtists[i].image = a.images?.[2]?.url || a.images?.[0]?.url || null;
+              uniqueArtists[i].genres = a.genres || [];
+            }
+          });
+        }
+      }
       setRecommendations({
         tracks: recTracks.slice(0, 6),
-        artists: Array.from(artistMap.values()).slice(0, 6),
+        artists: uniqueArtists,
       });
     } catch (e) {
       console.warn("Recommendations error:", e);
@@ -699,9 +719,13 @@ ANECDOTES
                             style={styles.recItem}
                             onClick={e => { e.preventDefault(); window.location.href = a.uri; }}
                           >
-                            <div style={{ ...styles.recThumb, background: "rgba(29,185,84,.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🎤</div>
+                            {a.image
+                              ? <img src={a.image} alt="" style={{ ...styles.recThumb, borderRadius: "50%" }} />
+                              : <div style={{ ...styles.recThumb, borderRadius: "50%", background: "rgba(29,185,84,.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🎤</div>
+                            }
                             <div style={styles.recInfo}>
                               <span style={styles.recTitle}>{a.name}</span>
+                              {a.genres?.[0] && <span style={styles.recSub}>{a.genres[0]}</span>}
                             </div>
                             <span style={styles.recArrow}>▶</span>
                           </a>
