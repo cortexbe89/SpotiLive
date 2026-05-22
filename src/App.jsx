@@ -249,27 +249,38 @@ export default function SpotiLive() {
         lastfmFetch({ method: "artist.getSimilar", api_key: LASTFM_KEY, artist: artistName, limit: 6 }).catch(() => null),
       ]);
 
-      // Titres similaires → recherche Spotify pour pochette + URI
+      // Titres similaires → Last.fm d'abord, fallback sur top-tracks Spotify
       const similarTracks = similarTracksRes?.similartracks?.track || [];
-      const recTracks = await Promise.all(
-        similarTracks.slice(0, 6).map(async t => {
-          try {
-            const res = await fetch(
-              `https://api.spotify.com/v1/search?q=track:${encodeURIComponent(t.name)}+artist:${encodeURIComponent(t.artist?.name || artistName)}&type=track&limit=1&market=BE`,
-              { headers }
-            ).then(r => r.ok ? r.json() : null);
-            const item = res?.tracks?.items?.[0];
-            if (item) return {
-              id: item.id,
-              name: item.name,
-              uri: item.uri,
-              album: item.album,
-              artists: item.artists,
-            };
-          } catch {}
-          return null;
-        })
-      );
+      let recTracks = [];
+
+      if (similarTracks.length > 0) {
+        // Last.fm a trouvé des titres similaires → les résoudre sur Spotify
+        const resolved = await Promise.all(
+          similarTracks.slice(0, 8).map(async t => {
+            try {
+              const res = await fetch(
+                `https://api.spotify.com/v1/search?q=track:${encodeURIComponent(t.name)}+artist:${encodeURIComponent(t.artist?.name || artistName)}&type=track&limit=1&market=BE`,
+                { headers }
+              ).then(r => r.ok ? r.json() : null);
+              const item = res?.tracks?.items?.[0];
+              if (item) return { id: item.id, name: item.name, uri: item.uri, album: item.album, artists: item.artists };
+            } catch {}
+            return null;
+          })
+        );
+        recTracks = resolved.filter(Boolean).slice(0, 6);
+      }
+
+      if (recTracks.length === 0) {
+        // Fallback : top-tracks de l'artiste (hors titre en cours)
+        const topRes = await fetch(
+          `https://api.spotify.com/v1/artists/${artistId}/top-tracks?market=BE`,
+          { headers }
+        ).then(r => r.ok ? r.json() : null).catch(() => null);
+        recTracks = (topRes?.tracks || [])
+          .filter(t => t.id !== track.id)
+          .slice(0, 6);
+      }
 
       // Artistes similaires → recherche Spotify pour photo + URI
       const similarArtistNames = (similarArtistsRes?.similarartists?.artist || []).slice(0, 6).map(a => a.name);
