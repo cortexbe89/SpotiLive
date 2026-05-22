@@ -279,22 +279,40 @@ ANECDOTES
       const raw = groqData.choices?.[0]?.message?.content || "";
 
       if (raw) {
-        const parts = raw.split("\n---\n");
+        // Parsing robuste : Groq peut varier les séparateurs et la casse
+        // On split sur toute variante de --- (avec ou sans espaces, newlines)
+        const parts = raw.split(/\n\s*---+\s*\n/);
+
         const extract = (label) => {
-          const idx = parts.findIndex(p => p.trim().toUpperCase().startsWith(label));
-          if (idx === -1) return "";
+          // Cherche la section par son label en début de bloc (insensible casse)
+          const idx = parts.findIndex(p => p.trim().toUpperCase().startsWith(label.toUpperCase()));
+          if (idx === -1) {
+            // Fallback : cherche le label n'importe où dans le bloc
+            const idx2 = parts.findIndex(p => p.toUpperCase().includes("\n" + label.toUpperCase()));
+            if (idx2 === -1) return "";
+            const sec2 = parts[idx2];
+            const labelPos = sec2.toUpperCase().indexOf(label.toUpperCase());
+            const afterLabel = sec2.slice(labelPos + label.length).trim();
+            return afterLabel.startsWith("\n") ? afterLabel.slice(1).trim() : afterLabel;
+          }
           const sec = parts[idx].trim();
+          // Supprimer la première ligne (le label lui-même)
           const nl = sec.indexOf("\n");
-          return nl === -1 ? "" : sec.slice(nl).trim();
+          return nl === -1 ? sec : sec.slice(nl).trim();
         };
+
         bio = extract("BIO");
         explication = extract("CHANSON");
         const anecdotesRaw = extract("ANECDOTES");
+
+        // Parser les anecdotes : lignes commençant par -, *, •, chiffre, ou lettre
         anecdotes = anecdotesRaw
           .split("\n")
-          .filter(l => l.trim().startsWith("-"))
-          .map(l => { const t = l.trim(); return t.startsWith("- ") ? t.slice(2) : t.slice(1).trim(); })
-          .filter(Boolean);
+          .map(l => l.trim())
+          .filter(l => l.length > 10)
+          .map(l => { const t = l.trim(); return t.replace(/^[-*\u2022\u00b7\d.]+\s*/, "").trim() || t; })
+          .filter(Boolean)
+          .slice(0, 4);
       }
 
       // 6. Fallbacks uniquement si Groq échoue complètement
