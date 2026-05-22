@@ -88,6 +88,7 @@ export default function SpotiLive() {
 
   const [aiContent, setAiContent] = useState(null);
   const [quickInfo, setQuickInfo] = useState({ genre: "—", ambiance: "—", playcount: null });
+  const [recommendations, setRecommendations] = useState({ tracks: [], artists: [] });
   const [aiLoading, setAiLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState("now");
@@ -237,10 +238,43 @@ export default function SpotiLive() {
     if (topArt?.items) setTopArtists(topArt.items);
   }, [spotifyFetch]);
 
+  const fetchRecommendations = async (track) => {
+    const currentToken = sessionStorage.getItem("spotify_token");
+    if (!currentToken) return;
+    try {
+      const artistId = track.artists[0].id;
+      const trackId = track.id;
+      // Spotify recommendations endpoint
+      const res = await fetch(
+        `https://api.spotify.com/v1/recommendations?seed_artists=${artistId}&seed_tracks=${trackId}&limit=10`,
+        { headers: { Authorization: `Bearer ${currentToken}` } }
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const recTracks = data.tracks || [];
+      // Extract unique artists from recommended tracks
+      const artistMap = new Map();
+      recTracks.forEach(t => {
+        t.artists.forEach(a => {
+          if (a.id !== artistId && !artistMap.has(a.id)) {
+            artistMap.set(a.id, { id: a.id, name: a.name, uri: a.uri });
+          }
+        });
+      });
+      setRecommendations({
+        tracks: recTracks.slice(0, 6),
+        artists: Array.from(artistMap.values()).slice(0, 6),
+      });
+    } catch (e) {
+      console.warn("Recommendations error:", e);
+    }
+  };
+
   const generateAiContent = async (track) => {
     setAiContent(null);
     setAiLoading(true);
     setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
+    setRecommendations({ tracks: [], artists: [] });
     try {
       const artistName = track.artists[0].name;
       const trackName = track.name;
@@ -431,6 +465,7 @@ ANECDOTES
     if (track.id !== lastTrackRef.current) {
       lastTrackRef.current = track.id;
       generateAiContent(track);
+      fetchRecommendations(track);
     }
   }, [spotifyFetch]);
 
@@ -466,7 +501,7 @@ ANECDOTES
     sessionStorage.removeItem("spotify_token");
     localStorage.removeItem("spotify_refresh_token");
     localStorage.removeItem("spotify_expires_at");
-    setCurrent(null); setAiContent(null); setTrackStats(null);
+    setCurrent(null); setAiContent(null); setTrackStats(null); setRecommendations({ tracks: [], artists: [] });
     setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
   };
 
@@ -622,6 +657,53 @@ ANECDOTES
                       <div style={styles.lfmGrid}>
                         <div style={styles.lfmStat}><span style={styles.lfmVal}>{fmtNum(artistStats.lastfm.stats?.playcount)}</span><span style={styles.lfmLbl}>écoutes</span></div>
                         <div style={styles.lfmStat}><span style={styles.lfmVal}>{fmtNum(artistStats.lastfm.stats?.listeners)}</span><span style={styles.lfmLbl}>auditeurs</span></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {recommendations.tracks.length > 0 && (
+                    <div style={styles.aiBlock}>
+                      <h3 style={styles.aiTitle}>Titres similaires</h3>
+                      <div style={styles.recList}>
+                        {recommendations.tracks.map(t => (
+                          <a
+                            key={t.id}
+                            href={t.uri}
+                            style={styles.recItem}
+                            onClick={e => { e.preventDefault(); window.location.href = t.uri; }}
+                          >
+                            {t.album?.images?.[2]?.url && (
+                              <img src={t.album.images[2].url} alt="" style={styles.recThumb} />
+                            )}
+                            <div style={styles.recInfo}>
+                              <span style={styles.recTitle}>{t.name}</span>
+                              <span style={styles.recSub}>{t.artists.map(a => a.name).join(", ")}</span>
+                            </div>
+                            <span style={styles.recArrow}>▶</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {recommendations.artists.length > 0 && (
+                    <div style={styles.aiBlock}>
+                      <h3 style={styles.aiTitle}>Artistes similaires</h3>
+                      <div style={styles.recList}>
+                        {recommendations.artists.map(a => (
+                          <a
+                            key={a.id}
+                            href={a.uri}
+                            style={styles.recItem}
+                            onClick={e => { e.preventDefault(); window.location.href = a.uri; }}
+                          >
+                            <div style={{ ...styles.recThumb, background: "rgba(29,185,84,.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🎤</div>
+                            <div style={styles.recInfo}>
+                              <span style={styles.recTitle}>{a.name}</span>
+                            </div>
+                            <span style={styles.recArrow}>▶</span>
+                          </a>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -792,6 +874,13 @@ const styles = {
   tagsRow: { display: "flex", flexWrap: "wrap", gap: 6 },
   tag: { fontSize: 11, padding: "3px 8px", background: "rgba(29,185,84,.12)", color: "#1db954", borderRadius: 20 },
   aiPlaceholder: { padding: 40, textAlign: "center", opacity: 0.3, fontSize: 13 },
+  recList: { display: "flex", flexDirection: "column", gap: 2 },
+  recItem: { display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,.04)", textDecoration: "none", color: "#f0ede8", cursor: "pointer" },
+  recThumb: { width: 38, height: 38, borderRadius: 6, flexShrink: 0, objectFit: "cover" },
+  recInfo: { flex: 1, minWidth: 0 },
+  recTitle: { display: "block", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  recSub: { display: "block", fontSize: 11, opacity: 0.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  recArrow: { fontSize: 10, opacity: 0.3, flexShrink: 0, color: "#1db954" },
   statsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20 },
   statCard: { background: "rgba(255,255,255,.04)", borderRadius: 16, padding: "20px", border: "1px solid rgba(255,255,255,.06)" },
   cardTitle: { fontSize: 13, fontWeight: 400, marginBottom: 16, opacity: 0.7, fontFamily: "'Fraunces', serif" },
