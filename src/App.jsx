@@ -96,6 +96,37 @@ export default function SpotiLive() {
   const lastTrackRef = useRef(null);
   const progressRef = useRef(null);
 
+  const refreshAccessToken = useCallback(async () => {
+    const refreshToken = localStorage.getItem("spotify_refresh_token");
+    if (!refreshToken) return null;
+    try {
+      const res = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: SPOTIFY_CLIENT_ID,
+        }),
+      });
+      const data = await res.json();
+      if (data.access_token) {
+        setToken(data.access_token);
+        sessionStorage.setItem("spotify_token", data.access_token);
+        const expiresAt = Date.now() + (data.expires_in || 3600) * 1000;
+        localStorage.setItem("spotify_expires_at", expiresAt);
+        // Spotify peut envoyer un nouveau refresh token
+        if (data.refresh_token) {
+          localStorage.setItem("spotify_refresh_token", data.refresh_token);
+        }
+        return data.access_token;
+      }
+    } catch (e) {
+      console.warn("Refresh token failed:", e);
+    }
+    return null;
+  }, []);
+
   const handleSpotifyLogin = async () => {
     const verifier = generateCodeVerifier();
     const challenge = await generateCodeChallenge(verifier);
@@ -127,12 +158,29 @@ export default function SpotiLive() {
         if (data.access_token) {
           setToken(data.access_token);
           sessionStorage.setItem("spotify_token", data.access_token);
+          // Stocker le refresh token en localStorage pour persister entre sessions
+          if (data.refresh_token) {
+            localStorage.setItem("spotify_refresh_token", data.refresh_token);
+          }
+          // Stocker l'expiration (expires_in est en secondes, généralement 3600)
+          const expiresAt = Date.now() + (data.expires_in || 3600) * 1000;
+          localStorage.setItem("spotify_expires_at", expiresAt);
           sessionStorage.removeItem("pkce_verifier");
         }
       });
     } else {
+      // Vérifier si on a un token en session encore valide
       const saved = sessionStorage.getItem("spotify_token");
-      if (saved) setToken(saved);
+      const expiresAt = localStorage.getItem("spotify_expires_at");
+      const refreshToken = localStorage.getItem("spotify_refresh_token");
+
+      if (saved && expiresAt && Date.now() < Number(expiresAt) - 60000) {
+        // Token encore valide (avec 1 min de marge)
+        setToken(saved);
+      } else if (refreshToken) {
+        // Token expiré mais on a un refresh token → renouveler silencieusement
+        refreshAccessToken();
+      }
     }
   }, []);
 
@@ -141,10 +189,27 @@ export default function SpotiLive() {
     const res = await fetch(`https://api.spotify.com/v1/${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (res.status === 401) { setToken(null); sessionStorage.removeItem("spotify_token"); return null; }
+    if (res.status === 401) {
+      // Token expiré → tenter un refresh automatique
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        // Réessayer la requête avec le nouveau token
+        const retry = await fetch(`https://api.spotify.com/v1/${path}`, {
+          headers: { Authorization: `Bearer ${newToken}` },
+        });
+        if (retry.status === 204 || retry.status === 202) return null;
+        if (retry.ok) return retry.json();
+      }
+      // Refresh échoué → déconnecter
+      setToken(null);
+      sessionStorage.removeItem("spotify_token");
+      localStorage.removeItem("spotify_refresh_token");
+      localStorage.removeItem("spotify_expires_at");
+      return null;
+    }
     if (res.status === 204 || res.status === 202) return null;
     return res.json();
-  }, [token]);
+  }, [token, refreshAccessToken]);
 
 
 
@@ -391,8 +456,12 @@ ANECDOTES
   };
 
   const logout = () => {
-    setToken(null); sessionStorage.removeItem("spotify_token");
-    setCurrent(null); setAiContent(null); setTrackStats(null); setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
+    setToken(null);
+    sessionStorage.removeItem("spotify_token");
+    localStorage.removeItem("spotify_refresh_token");
+    localStorage.removeItem("spotify_expires_at");
+    setCurrent(null); setAiContent(null); setTrackStats(null);
+    setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
   };
 
   const pct = current ? (progress / current.duration_ms) * 100 : 0;
