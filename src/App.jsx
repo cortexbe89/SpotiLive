@@ -194,7 +194,11 @@ export default function SpotiLive() {
       const yr = track.album.release_date?.slice(0, 4) || "";
       const key = lastfmKey || LASTFM_KEY;
 
-      // Toutes les sources en parallèle
+      // 1. Genres Spotify sur l'artiste (sans Last.fm)
+      const spotifyArtist = await spotifyFetch(`artists/${track.artists[0].id}`).catch(() => null);
+      const spotifyGenres = spotifyArtist?.genres || [];
+
+      // 2. Toutes les autres sources en parallèle
       const [lfmArtistRes, lfmTrackRes, mbRes, wikiArtistRaw, wikiTrackRaw] = await Promise.all([
         lastfmFetch({ method: "artist.getInfo", api_key: key, artist: artistName, lang: "fr" }).catch(() => ({})),
         lastfmFetch({ method: "track.getInfo", api_key: key, artist: artistName, track: trackName }).catch(() => ({})),
@@ -210,12 +214,13 @@ export default function SpotiLive() {
       const lfmTrack = lfmTrackRes?.track;
       const mbRecording = mbRes?.recordings?.[0];
 
-      // Tags Last.fm
-      const tags = lfmArtist?.tags?.tag?.map(t => t.name) || lfmTrack?.toptags?.tag?.map(t => t.name) || [];
-      const genre = tags[0] || "—";
-      const ambiance = tags.slice(1, 3).join(", ") || "—";
+      // 3. Genre & Ambiance : Spotify en priorité, puis Last.fm
+      const lfmTags = lfmArtist?.tags?.tag?.map(t => t.name) || lfmTrack?.toptags?.tag?.map(t => t.name) || [];
+      const allGenres = [...spotifyGenres, ...lfmTags];
+      const genre = allGenres[0] || "—";
+      const ambiance = allGenres.slice(1, 3).join(", ") || "—";
 
-      // Préparer les sources brutes pour Groq
+      // 4. Sources brutes pour Groq
       const wikiArtistClean = wikiArtistRaw ? cleanAndTruncate(wikiArtistRaw, 800) : "";
       const wikiTrackClean = wikiTrackRaw ? cleanAndTruncate(wikiTrackRaw, 500) : "";
       const lfmBioClean = cleanAndTruncate(
@@ -224,7 +229,6 @@ export default function SpotiLive() {
       const lfmWikiClean = cleanAndTruncate(
         (lfmTrack?.wiki?.content || lfmTrack?.wiki?.summary || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(), 300
       );
-
       const mbDate = mbRecording?.releases?.[0]?.date || "";
       const mbCountry = mbRecording?.releases?.[0]?.country || "";
       const mbDur = mbRecording?.length
@@ -234,14 +238,15 @@ export default function SpotiLive() {
       const lfmPlays = lfmTrack?.playcount ? Number(lfmTrack.playcount).toLocaleString("fr-BE") : "";
       const lfmListeners = lfmArtist?.stats?.listeners ? Number(lfmArtist.stats.listeners).toLocaleString("fr-BE") : "";
 
-      // Prompt Groq
-      const prompt = `Tu es un expert musical passionné. Réponds UNIQUEMENT en français, avec des phrases riches et complètes.
+      // 5. Groq en priorité absolue
+      const prompt = `Tu es un expert musical passionné. Réponds UNIQUEMENT en français, avec des phrases riches et complètes. Ne commence jamais une section par "Je ne sais pas" ou "Peu d'informations" : utilise toujours ce que tu connais de l'artiste et du genre musical pour enrichir ta réponse.
 
 Informations disponibles :
 - Artiste : ${artistName}
 - Chanson : "${trackName}"
 - Album : ${albumName} (${yr})
-- Tags musicaux : ${tags.join(", ") || "non disponibles"}
+- Genres Spotify : ${spotifyGenres.join(", ") || "non disponibles"}
+- Tags Last.fm : ${lfmTags.join(", ") || "non disponibles"}
 - Wikipedia artiste : ${wikiArtistClean || "non disponible"}
 - Wikipedia chanson : ${wikiTrackClean || "non disponible"}
 - Bio Last.fm : ${lfmBioClean || "non disponible"}
@@ -250,64 +255,63 @@ Informations disponibles :
 - Écoutes Last.fm : ${lfmPlays || "non disponible"}
 - Auditeurs Last.fm : ${lfmListeners || "non disponible"}
 
-Écris exactement 3 sections séparées par ---
+Écris exactement 3 sections séparées par la ligne ---
 
 BIO
-Biographie complète et passionnante de ${artistName} en 5-6 phrases. Inclure : origines, style musical, influences, carrière, albums importants, anecdotes marquantes. Utilise les sources Wikipedia et Last.fm. Si peu d'info, développe à partir du genre et de l'époque.
+Biographie complète et passionnante de ${artistName} en 5-6 phrases. Inclure : origines, style musical, influences, carrière, albums importants, anecdotes marquantes. Utilise Wikipedia et Last.fm. Développe généreusement même si les sources sont limitées.
 
+---
 
 CHANSON
-Histoire et contexte de "${trackName}" en 4-5 phrases. Inclure : contexte de création, thèmes abordés, ambiance sonore, réception, place dans la discographie. Si peu d'info sur cette chanson précise, parle du style de l'album et de l'artiste à cette période.
+Histoire et contexte de "${trackName}" en 4-5 phrases. Contexte de création, thèmes abordés, ambiance sonore, réception, place dans la discographie. Développe à partir du style de l'artiste et de l'époque si peu d'infos spécifiques.
 
+---
 
 ANECDOTES
-3 anecdotes fascinantes sur l'artiste ou la chanson, une par ligne, commençant par un tiret. Utilise les données factuelles disponibles (dates, chiffres, pays) et enrichis avec des faits culturels ou historiques pertinents.`;
+3 anecdotes fascinantes sur l'artiste ou la chanson, une par ligne, commençant par un tiret. Mélange faits factuels (dates, chiffres MusicBrainz/Last.fm) et contexte culturel pertinent.`;
 
-      // Appel Groq
       let bio = "";
       let explication = "";
       let anecdotes = [];
 
-      try {
-        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${GROQ_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: GROQ_MODEL,
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.6,
-            max_tokens: 1200,
-          }),
-        });
-        const groqData = await groqRes.json();
-        const raw = groqData.choices?.[0]?.message?.content || "";
+      const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.6,
+          max_tokens: 1400,
+        }),
+      });
+      const groqData = await groqRes.json();
+      const raw = groqData.choices?.[0]?.message?.content || "";
 
-        if (raw) {
-          const parts = raw.split("\n---\n");
-          const extract = (label) => {
-            const idx = parts.findIndex(p => p.trim().toUpperCase().startsWith(label));
-            if (idx === -1) return "";
-            const sec = parts[idx].trim(); const nl = sec.indexOf("\n"); return nl === -1 ? "" : sec.slice(nl).trim();
-          };
-          bio = extract("BIO");
-          explication = extract("CHANSON");
-          const anecdotesRaw = extract("ANECDOTES");
-          anecdotes = anecdotesRaw
-            .split("\n")
-            .filter(l => l.trim().startsWith("-"))
-            .map(l => { const t = l.trim(); return t.startsWith("- ") ? t.slice(2) : t.slice(1).trim(); })
-            .filter(Boolean);
-        }
-      } catch (e) {
-        console.warn("Groq error:", e);
+      if (raw) {
+        const parts = raw.split("\n---\n");
+        const extract = (label) => {
+          const idx = parts.findIndex(p => p.trim().toUpperCase().startsWith(label));
+          if (idx === -1) return "";
+          const sec = parts[idx].trim();
+          const nl = sec.indexOf("\n");
+          return nl === -1 ? "" : sec.slice(nl).trim();
+        };
+        bio = extract("BIO");
+        explication = extract("CHANSON");
+        const anecdotesRaw = extract("ANECDOTES");
+        anecdotes = anecdotesRaw
+          .split("\n")
+          .filter(l => l.trim().startsWith("-"))
+          .map(l => { const t = l.trim(); return t.startsWith("- ") ? t.slice(2) : t.slice(1).trim(); })
+          .filter(Boolean);
       }
 
-      // Fallbacks si Groq échoue
+      // 6. Fallbacks uniquement si Groq échoue complètement
       if (!bio) {
-        bio = wikiArtistClean || lfmBioClean || `${artistName} est un artiste musical. Aucune biographie détaillée n'est disponible.`;
+        bio = wikiArtistClean || lfmBioClean || `${artistName} est un artiste musical dont les informations biographiques n'ont pas pu être récupérées.`;
       }
       if (!explication) {
         const dur = track.duration_ms
@@ -321,17 +325,19 @@ ANECDOTES
         if (mbCountry) anecdotes.push(`Pays de sortie : ${mbCountry}.`);
         if (lfmPlays) anecdotes.push(`Ce titre totalise ${lfmPlays} écoutes sur Last.fm.`);
         if (lfmListeners) anecdotes.push(`${lfmListeners} auditeurs uniques sur Last.fm.`);
-        if (mbReleases > 1) anecdotes.push(`Ce titre est apparu sur ${mbReleases} sorties différentes selon MusicBrainz.`);
+        if (mbReleases > 1) anecdotes.push(`Ce titre est apparu sur ${mbReleases} sorties selon MusicBrainz.`);
       }
 
       setTrackStats({ lastfm: lfmTrack });
       setArtistStats({ lastfm: lfmArtist });
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
     } catch (e) {
+      console.error("generateAiContent error:", e);
       setAiContent({ bio: "Données indisponibles.", explication: "", anecdotes: [], genre: "—", ambiance: "—" });
     }
     setAiLoading(false);
   };
+
 
   const fetchCurrent = useCallback(async () => {
     const data = await spotifyFetch("me/player/currently-playing");
