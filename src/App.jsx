@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ─── SPOTIFY CONFIG ────────────────────────────────────────────────────────────
+const SPOTIFY_CLIENT_ID = "80383eb1983d4282b296c26b91b75b6d";
 const SPOTIFY_CLIENT_ID_KEY = "spotilive_client_id";
 const SPOTIFY_SCOPES = [
   "user-read-currently-playing",
@@ -46,7 +47,7 @@ function fmtNum(n) {
 // ─── MAIN APP ──────────────────────────────────────────────────────────────────
 export default function SpotiLive() {
   // Auth & config
-  const [clientId, setClientId] = useState(() => localStorage.getItem(SPOTIFY_CLIENT_ID_KEY) || "");
+  const [clientId, setClientId] = useState(SPOTIFY_CLIENT_ID);
   const [clientIdInput, setClientIdInput] = useState("");
   const [lastfmKey, setLastfmKey] = useState(() => localStorage.getItem("spotilive_lastfm_key") || "");
   const [lastfmKeyInput, setLastfmKeyInput] = useState("");
@@ -81,9 +82,7 @@ export default function SpotiLive() {
 
   // ── OAuth PKCE ────────────────────────────────────────────────────────────
   const handleSpotifyLogin = async () => {
-    const id = clientId.trim();
-    if (!id) { alert("Entrez votre Spotify Client ID d'abord."); return; }
-    localStorage.setItem(SPOTIFY_CLIENT_ID_KEY, id);
+    const id = SPOTIFY_CLIENT_ID;
     const verifier = generateCodeVerifier();
     const challenge = await generateCodeChallenge(verifier);
     sessionStorage.setItem("pkce_verifier", verifier);
@@ -106,8 +105,8 @@ export default function SpotiLive() {
     const code = params.get("code");
     const verifier = sessionStorage.getItem("pkce_verifier");
     const redirectUri = sessionStorage.getItem("pkce_redirect");
-    const id = localStorage.getItem(SPOTIFY_CLIENT_ID_KEY);
-    if (code && verifier && id) {
+    const id = SPOTIFY_CLIENT_ID;
+    if (code && verifier) {
       window.history.replaceState({}, "", window.location.pathname);
       fetch("https://accounts.spotify.com/api/token", {
         method: "POST",
@@ -292,82 +291,54 @@ Sois précis, factuel, et évite les généralités. Si tu n'es pas sûr d'une a
   const pct = current ? (progress / current.duration_ms) * 100 : 0;
 
   // ─────────────────────────────────────────────────────────────────────────
-  // RENDER: CONFIG SCREEN
+  // RENDER: LOGIN SCREEN
   // ─────────────────────────────────────────────────────────────────────────
-  if (!clientId && !token) {
-    return (
-      <div style={styles.configScreen}>
-        <div style={styles.configCard}>
-          <div style={styles.logo}>SpotiLive</div>
-          <p style={styles.configSubtitle}>Connectez vos comptes pour commencer</p>
-
-          <div style={styles.configSection}>
-            <label style={styles.configLabel}>🎵 Spotify Client ID</label>
-            <input
-              style={styles.configInput}
-              placeholder="Votre Client ID Spotify"
-              value={clientIdInput}
-              onChange={e => setClientIdInput(e.target.value)}
-            />
-            <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer" style={styles.configLink}>
-              → Créer une app Spotify (gratuit)
-            </a>
-            <p style={styles.configHint}>Redirect URI à ajouter : <code style={styles.code}>{window.location.href.split("?")[0].split("#")[0]}</code></p>
-          </div>
-
-          <div style={styles.configSection}>
-            <label style={styles.configLabel}>📻 Last.fm API Key <span style={styles.optional}>(optionnel)</span></label>
-            <input
-              style={styles.configInput}
-              placeholder="Votre clé API Last.fm"
-              value={lastfmKeyInput}
-              onChange={e => setLastfmKeyInput(e.target.value)}
-            />
-            <input
-              style={{ ...styles.configInput, marginTop: 8 }}
-              placeholder="Votre username Last.fm"
-              value={lastfmUserInput}
-              onChange={e => setLastfmUserInput(e.target.value)}
-            />
-            <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer" style={styles.configLink}>
-              → Obtenir une clé API Last.fm (gratuit)
-            </a>
-          </div>
-
-          <button
-            style={styles.btnPrimary}
-            onClick={() => {
-              if (clientIdInput) { localStorage.setItem(SPOTIFY_CLIENT_ID_KEY, clientIdInput); setClientId(clientIdInput); }
-              if (lastfmKeyInput) { localStorage.setItem("spotilive_lastfm_key", lastfmKeyInput); setLastfmKey(lastfmKeyInput); }
-              if (lastfmUserInput) { localStorage.setItem("spotilive_lastfm_user", lastfmUserInput); setLastfmUser(lastfmUserInput); }
-            }}
-          >
-            Continuer →
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   if (!token) {
     return (
       <div style={styles.configScreen}>
         <div style={styles.configCard}>
           <div style={styles.logo}>SpotiLive</div>
-          <p style={styles.configSubtitle}>Connectez-vous avec Spotify</p>
+          <p style={styles.configSubtitle}>Votre musique, enrichie en temps réel</p>
+
           <button style={styles.btnSpotify} onClick={handleSpotifyLogin}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style={{ marginRight: 10 }}>
               <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
             </svg>
             Se connecter avec Spotify
           </button>
-          <button style={styles.btnSecondary} onClick={() => { localStorage.removeItem(SPOTIFY_CLIENT_ID_KEY); setClientId(""); }}>
-            ← Modifier la configuration
-          </button>
+
+          <div style={styles.divider}><span style={styles.dividerText}>Last.fm (optionnel)</span></div>
+
+          <div style={styles.configSection}>
+            <input
+              style={styles.configInput}
+              placeholder="Clé API Last.fm"
+              value={lastfmKeyInput}
+              onChange={e => setLastfmKeyInput(e.target.value)}
+            />
+            <input
+              style={{ ...styles.configInput, marginTop: 8 }}
+              placeholder="Username Last.fm"
+              value={lastfmUserInput}
+              onChange={e => setLastfmUserInput(e.target.value)}
+            />
+            {(lastfmKeyInput || lastfmUserInput) && (
+              <button style={{ ...styles.btnPrimary, marginTop: 8 }} onClick={() => {
+                if (lastfmKeyInput) { localStorage.setItem("spotilive_lastfm_key", lastfmKeyInput); setLastfmKey(lastfmKeyInput); }
+                if (lastfmUserInput) { localStorage.setItem("spotilive_lastfm_user", lastfmUserInput); setLastfmUser(lastfmUserInput); }
+              }}>
+                Sauvegarder Last.fm
+              </button>
+            )}
+            <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer" style={styles.configLink}>
+              → Obtenir une clé API Last.fm (gratuit)
+            </a>
+          </div>
         </div>
       </div>
     );
   }
+
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER: MAIN APP
@@ -944,6 +915,8 @@ const styles = {
     outline: "none",
   },
   configLink: { fontSize: 12, color: "#1db954", textDecoration: "none", opacity: 0.8 },
+  divider: { display: "flex", alignItems: "center", gap: 12, margin: "4px 0" },
+  dividerText: { fontSize: 11, opacity: 0.35, whiteSpace: "nowrap", color: "#f0ede8" },
   configHint: { fontSize: 11, opacity: 0.4, color: "#f0ede8", lineHeight: 1.6 },
   code: {
     background: "rgba(255,255,255,.08)", padding: "2px 6px",
