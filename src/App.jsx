@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-// ─── SPOTIFY CONFIG ────────────────────────────────────────────────────────────
 const SPOTIFY_CLIENT_ID = "80383eb1983d4282b296c26b91b75b6d";
 const GEMINI_API_KEY = "AIzaSyDA4lmH8_AgFLeN6yQfByGPfnA7VtZAcaU";
 const SPOTIFY_CLIENT_ID_KEY = "spotilive_client_id";
@@ -11,7 +10,6 @@ const SPOTIFY_SCOPES = [
   "user-top-read",
 ].join(" ");
 
-// ─── PKCE HELPERS ──────────────────────────────────────────────────────────────
 function generateCodeVerifier(length = 128) {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
   const arr = new Uint8Array(length);
@@ -25,9 +23,7 @@ async function generateCodeChallenge(verifier) {
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
-// ─── LAST.FM ───────────────────────────────────────────────────────────────────
 const LASTFM_API = "https://ws.audioscrobbler.com/2.0/";
-
 async function lastfmFetch(params) {
   const url = new URL(LASTFM_API);
   Object.entries({ ...params, format: "json" }).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -35,7 +31,6 @@ async function lastfmFetch(params) {
   return res.json();
 }
 
-// ─── UTILS ─────────────────────────────────────────────────────────────────────
 function msToTime(ms) {
   const s = Math.floor(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -45,11 +40,8 @@ function fmtNum(n) {
   return Number(n).toLocaleString("fr-BE");
 }
 
-// ─── MAIN APP ──────────────────────────────────────────────────────────────────
 export default function SpotiLive() {
-  // Auth & config
-  const [clientId, setClientId] = useState(SPOTIFY_CLIENT_ID);
-  const [clientIdInput, setClientIdInput] = useState("");
+  const [clientId] = useState(SPOTIFY_CLIENT_ID);
   const [lastfmKey, setLastfmKey] = useState(() => localStorage.getItem("spotilive_lastfm_key") || "");
   const [lastfmKeyInput, setLastfmKeyInput] = useState("");
   const [lastfmUser, setLastfmUser] = useState(() => localStorage.getItem("spotilive_lastfm_user") || "");
@@ -57,32 +49,26 @@ export default function SpotiLive() {
   const [token, setToken] = useState(null);
   const [showConfig, setShowConfig] = useState(false);
 
-  // Playback
   const [current, setCurrent] = useState(null);
   const [progress, setProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Stats
   const [trackStats, setTrackStats] = useState(null);
   const [artistStats, setArtistStats] = useState(null);
   const [topTracks, setTopTracks] = useState([]);
   const [topArtists, setTopArtists] = useState([]);
   const [recentTracks, setRecentTracks] = useState([]);
   const [lastfmProfile, setLastfmProfile] = useState(null);
-  const [lastfmNowPlaying, setLastfmNowPlaying] = useState(null);
 
-  // AI content
   const [aiContent, setAiContent] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [geminiDebug, setGeminiDebug] = useState(null);
 
-  // UI
   const [activeTab, setActiveTab] = useState("now");
   const pollRef = useRef(null);
   const lastTrackRef = useRef(null);
   const progressRef = useRef(null);
 
-  // ── OAuth PKCE ────────────────────────────────────────────────────────────
   const handleSpotifyLogin = async () => {
     const id = SPOTIFY_CLIENT_ID;
     const verifier = generateCodeVerifier();
@@ -91,51 +77,40 @@ export default function SpotiLive() {
     const redirectUri = window.location.href.split("?")[0].split("#")[0];
     sessionStorage.setItem("pkce_redirect", redirectUri);
     const params = new URLSearchParams({
-      client_id: id,
-      response_type: "code",
-      redirect_uri: redirectUri,
-      scope: SPOTIFY_SCOPES,
-      code_challenge_method: "S256",
-      code_challenge: challenge,
+      client_id: id, response_type: "code", redirect_uri: redirectUri,
+      scope: SPOTIFY_SCOPES, code_challenge_method: "S256", code_challenge: challenge,
     });
     window.location.href = "https://accounts.spotify.com/authorize?" + params;
   };
 
-  // ── Token exchange after redirect ─────────────────────────────────────────
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
     const verifier = sessionStorage.getItem("pkce_verifier");
     const redirectUri = sessionStorage.getItem("pkce_redirect");
-    const id = SPOTIFY_CLIENT_ID;
     if (code && verifier) {
       window.history.replaceState({}, "", window.location.pathname);
       fetch("https://accounts.spotify.com/api/token", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: redirectUri,
-          client_id: id,
+          grant_type: "authorization_code", code,
+          redirect_uri: redirectUri, client_id: SPOTIFY_CLIENT_ID,
           code_verifier: verifier,
         }),
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.access_token) {
-            setToken(data.access_token);
-            sessionStorage.setItem("spotify_token", data.access_token);
-            sessionStorage.removeItem("pkce_verifier");
-          }
-        });
+      }).then(r => r.json()).then(data => {
+        if (data.access_token) {
+          setToken(data.access_token);
+          sessionStorage.setItem("spotify_token", data.access_token);
+          sessionStorage.removeItem("pkce_verifier");
+        }
+      });
     } else {
       const saved = sessionStorage.getItem("spotify_token");
       if (saved) setToken(saved);
     }
   }, []);
 
-  // ── Spotify API ───────────────────────────────────────────────────────────
   const spotifyFetch = useCallback(async (path) => {
     if (!token) return null;
     const res = await fetch(`https://api.spotify.com/v1/${path}`, {
@@ -146,7 +121,6 @@ export default function SpotiLive() {
     return res.json();
   }, [token]);
 
-  // ── Fetch current track ───────────────────────────────────────────────────
   const fetchCurrent = useCallback(async () => {
     const data = await spotifyFetch("me/player/currently-playing");
     if (!data || !data.item) { setCurrent(null); setIsPlaying(false); return; }
@@ -162,49 +136,40 @@ export default function SpotiLive() {
     }
   }, [spotifyFetch]);
 
-  // ── Fetch track stats (Spotify audio features + Last.fm) ──────────────────
   const fetchTrackStats = async (track) => {
     const feat = await spotifyFetch(`audio-features/${track.id}`);
     let lfm = null;
-    if (lastfmKey) {
-      lfm = await lastfmFetch({
-        method: "track.getInfo",
-        api_key: lastfmKey,
-        artist: track.artists[0].name,
-        track: track.name,
-        username: lastfmUser || undefined,
-      });
-    }
-    setTrackStats({ spotify: feat, lastfm: lfm?.track });
+    const key = lastfmKey || "43a8dd6083e2571bf6e47c5d88a88a7f";
+    try {
+      const r = await lastfmFetch({ method: "track.getInfo", api_key: key, artist: track.artists[0].name, track: track.name, username: lastfmUser || undefined });
+      lfm = r?.track;
+    } catch {}
+    setTrackStats({ spotify: feat, lastfm: lfm });
   };
 
   const fetchArtistStats = async (artist) => {
     const data = await spotifyFetch(`artists/${artist.id}`);
     let lfm = null;
-    if (lastfmKey) {
-      lfm = await lastfmFetch({
-        method: "artist.getInfo",
-        api_key: lastfmKey,
-        artist: artist.name,
-        lang: "fr",
-      });
-    }
-    setArtistStats({ spotify: data, lastfm: lfm?.artist });
+    const key = lastfmKey || "43a8dd6083e2571bf6e47c5d88a88a7f";
+    try {
+      const r = await lastfmFetch({ method: "artist.getInfo", api_key: key, artist: artist.name, lang: "fr" });
+      lfm = r?.artist;
+    } catch {}
+    setArtistStats({ spotify: data, lastfm: lfm });
   };
 
-  // ── Last.fm profile & listening stats ─────────────────────────────────────
   const fetchLastfmStats = useCallback(async () => {
-    if (!lastfmKey || !lastfmUser) return;
-    const [profile, recent, nowPlaying] = await Promise.all([
-      lastfmFetch({ method: "user.getInfo", api_key: lastfmKey, user: lastfmUser }),
-      lastfmFetch({ method: "user.getRecentTracks", api_key: lastfmKey, user: lastfmUser, limit: 10 }),
-      lastfmFetch({ method: "user.getRecentTracks", api_key: lastfmKey, user: lastfmUser, limit: 1 }),
-    ]);
-    setLastfmProfile(profile?.user);
-    const tracks = recent?.recenttracks?.track || [];
-    setRecentTracks(Array.isArray(tracks) ? tracks.slice(0, 10) : [tracks]);
-    const np = nowPlaying?.recenttracks?.track?.[0];
-    setLastfmNowPlaying(np?.["@attr"]?.nowplaying === "true" ? np : null);
+    if (!lastfmUser) return;
+    const key = lastfmKey || "43a8dd6083e2571bf6e47c5d88a88a7f";
+    try {
+      const [profile, recent] = await Promise.all([
+        lastfmFetch({ method: "user.getInfo", api_key: key, user: lastfmUser }),
+        lastfmFetch({ method: "user.getRecentTracks", api_key: key, user: lastfmUser, limit: 10 }),
+      ]);
+      setLastfmProfile(profile?.user);
+      const tracks = recent?.recenttracks?.track || [];
+      setRecentTracks(Array.isArray(tracks) ? tracks.slice(0, 10) : [tracks]);
+    } catch {}
   }, [lastfmKey, lastfmUser]);
 
   const fetchSpotifyStats = useCallback(async () => {
@@ -216,46 +181,43 @@ export default function SpotiLive() {
     if (topArt?.items) setTopArtists(topArt.items);
   }, [spotifyFetch]);
 
-  // ── Gemini : bio + explication enrichies en français ────────────────────
   const geminiEnrich = async (track, lfmArtist, lfmTrack) => {
     const artistName = track.artists[0].name;
     const trackName = track.name;
     const yr = track.album.release_date?.slice(0, 4) || "";
     const albumName = track.album.name;
-    const tags = lfmArtist?.artist?.tags?.tag?.map(t => t.name).join(", ") || "";
-    const lfmWikiRaw = (lfmTrack?.track?.wiki?.summary || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 400);
-    const lfmBioRaw = (lfmArtist?.artist?.bio?.summary || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 400);
+    const tags = lfmArtist?.tags?.tag?.map(t => t.name).join(", ") || "";
+    const lfmBioRaw = (lfmArtist?.bio?.summary || "").replace(/<[^>]+>/g, "").trim().slice(0, 300);
+    const lfmWikiRaw = (lfmTrack?.wiki?.summary || "").replace(/<[^>]+>/g, "").trim().slice(0, 300);
 
-    // Prompt simple et robuste — on demande du texte brut séparé par des délimiteurs
-    // pour éviter les échecs de parsing JSON
-    const prompt = `Tu es un expert musical passionné. Réponds OBLIGATOIREMENT en français.
+    const prompt = `Tu es un expert musical passionné. Réponds UNIQUEMENT en français, sans exception.
 
 Artiste: ${artistName}
 Chanson: ${trackName}
 Album: ${albumName} (${yr})
-Tags musicaux: ${tags || "inconnus"}
+Tags: ${tags || "non disponibles"}
 Bio Last.fm: ${lfmBioRaw || "non disponible"}
 Info chanson Last.fm: ${lfmWikiRaw || "non disponible"}
 
-Écris une réponse structurée avec exactement ces 4 sections, séparées par des lignes ---:
+Écris exactement 4 blocs séparés par la ligne ---
 
 BIO
-[Biographie détaillée et enthousiaste de ${artistName} en 5-6 phrases. Couvre: origines, style musical, influences, albums importants, succès, anecdotes marquantes. Si tu manques d'informations précises, développe à partir du genre et de l'époque. Toujours en français.]
+Biographie détaillée et passionnante de ${artistName} en 5-6 phrases complètes en français. Couvre les origines, le style, les influences, les albums importants, les succès, les anecdotes. Si tu manques d'infos précises, développe intelligemment à partir du genre et de l'époque.
 
 ---
 
 CHANSON
-[Explication approfondie de "${trackName}" en 4-5 phrases. Couvre: contexte de création, thèmes abordés, ambiance sonore, instruments, place dans la discographie. Toujours en français.]
+Explication approfondie de la chanson "${trackName}" en 4-5 phrases complètes en français. Couvre le contexte de création, les thèmes, l'ambiance sonore, la place dans la discographie.
 
 ---
 
 GENRE
-[Genre musical en 1-3 mots en français, ex: pop électronique, house music, jazz contemporain]
+Genre musical en 1-3 mots en français
 
 ---
 
 AMBIANCE
-[Ambiance en 2-3 mots français maximum, ex: mélancolique et doux, festif et énergique]`;
+Ambiance en 2-3 mots français maximum`;
 
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -269,106 +231,80 @@ AMBIANCE
       }
     );
     const data = await res.json();
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    setGeminiDebug({ raw: raw.slice(0, 600), error: data.error?.message || null });
 
     if (data.error) throw new Error(data.error.message);
+    if (!raw) throw new Error("Empty response");
 
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    setGeminiDebug({ raw: raw.slice(0, 800), error: data.error?.message || null, status: res.status });
-
-    // Parser le texte structuré par délimiteurs — plus robuste que JSON
-    const sections = raw.split(/^---$/m).map(s => s.trim());
+    const parts = raw.split(/\n---\n/);
     const extract = (label) => {
-      const sec = sections.find(s => s.toUpperCase().startsWith(label));
-      if (!sec) return "";
-      return sec.replace(new RegExp(`^${label}\s*`, "i"), "").replace(/^\[|\]$/g, "").trim();
+      const idx = parts.findIndex(p => p.trim().toUpperCase().startsWith(label));
+      if (idx === -1) return "";
+      return parts[idx].replace(new RegExp("^" + label + "\\s*", "i"), "").trim();
     };
 
-    const bio = extract("BIO");
-    const explication = extract("CHANSON");
-    const genre = extract("GENRE");
-    const ambiance = extract("AMBIANCE");
-
-    if (!bio && !explication) throw new Error("Gemini returned empty content");
-
-    return { bio, explication, genre, ambiance };
+    return {
+      bio: extract("BIO"),
+      explication: extract("CHANSON"),
+      genre: extract("GENRE"),
+      ambiance: extract("AMBIANCE"),
+    };
   };
 
-  // ── Enrichissement principal ───────────────────────────────────────────────
   const generateAiContent = async (track) => {
     setAiContent(null);
     setAiLoading(true);
+    setGeminiDebug(null);
     try {
       const artistName = track.artists[0].name;
       const trackName = track.name;
+      const key = lastfmKey || "43a8dd6083e2571bf6e47c5d88a88a7f";
 
-      // Last.fm + MusicBrainz en parallèle
-      const [lfmArtist, lfmTrack, mbData] = await Promise.all([
-        lastfmKey
-          ? lastfmFetch({ method: "artist.getInfo", api_key: lastfmKey, artist: artistName, lang: "fr" })
-          : fetch(`https://ws.audioscrobbler.com/2.0/?method=artist.getInfo&artist=${encodeURIComponent(artistName)}&lang=fr&api_key=43a8dd6083e2571bf6e47c5d88a88a7f&format=json`).then(r=>r.json()),
-        lastfmKey
-          ? lastfmFetch({ method: "track.getInfo", api_key: lastfmKey, artist: artistName, track: trackName })
-          : fetch(`https://ws.audioscrobbler.com/2.0/?method=track.getInfo&artist=${encodeURIComponent(artistName)}&track=${encodeURIComponent(trackName)}&api_key=43a8dd6083e2571bf6e47c5d88a88a7f&format=json`).then(r=>r.json()),
-        fetch(
-          `https://musicbrainz.org/ws/2/recording/?query=recording:"${encodeURIComponent(trackName)}" AND artist:"${encodeURIComponent(artistName)}"&limit=1&fmt=json`,
-          { headers: { "User-Agent": "SpotiLive/1.0 (https://spotilive.netlify.app)" } }
-        ).then(r=>r.json()).catch(()=>({})),
+      const [lfmArtistRes, lfmTrackRes, mbRes] = await Promise.all([
+        fetch(`https://ws.audioscrobbler.com/2.0/?method=artist.getInfo&artist=${encodeURIComponent(artistName)}&lang=fr&api_key=${key}&format=json`).then(r => r.json()).catch(() => ({})),
+        fetch(`https://ws.audioscrobbler.com/2.0/?method=track.getInfo&artist=${encodeURIComponent(artistName)}&track=${encodeURIComponent(trackName)}&api_key=${key}&format=json`).then(r => r.json()).catch(() => ({})),
+        fetch(`https://musicbrainz.org/ws/2/recording/?query=recording:"${encodeURIComponent(trackName)}" AND artist:"${encodeURIComponent(artistName)}"&limit=1&fmt=json`, { headers: { "User-Agent": "SpotiLive/1.0" } }).then(r => r.json()).catch(() => ({})),
       ]);
 
-      const mbRecording = mbData?.recordings?.[0];
+      const lfmArtist = lfmArtistRes?.artist;
+      const lfmTrack = lfmTrackRes?.track;
+      const mbRecording = mbRes?.recordings?.[0];
 
-      // Gemini appelé systématiquement
       let gemini = null;
-      try {
-        gemini = await geminiEnrich(track, lfmArtist, lfmTrack);
-      } catch (e) {
-        console.warn("Gemini failed:", e);
-      }
+      try { gemini = await geminiEnrich(track, lfmArtist, lfmTrack); }
+      catch (e) { setGeminiDebug(d => ({ ...d, parseError: e.message })); }
 
-      // Tags Last.fm en backup
-      const tags = lfmArtist?.artist?.tags?.tag?.map(t => t.name) || [];
-
+      const tags = lfmArtist?.tags?.tag?.map(t => t.name) || [];
       const genre = gemini?.genre || tags[0] || "—";
       const ambiance = gemini?.ambiance || tags.slice(1, 3).join(", ") || "—";
       const bio = gemini?.bio || "Biographie non disponible.";
-      const explication = gemini?.explication || (() => {
-        const yr = track.album.release_date?.slice(0, 4);
-        const dur = track.duration_ms
-          ? `${Math.floor(track.duration_ms/60000)}m${String(Math.floor((track.duration_ms%60000)/1000)).padStart(2,"0")}s`
-          : null;
-        return `"${trackName}" est un titre de ${artistName}, extrait de l'album "${track.album.name}"${yr ? ` (${yr})` : ""}${dur ? `. Durée : ${dur}` : ""}.`;
-      })();
+      const yr = track.album.release_date?.slice(0, 4);
+      const explication = gemini?.explication || `"${trackName}" est un titre de ${artistName}, extrait de l'album "${track.album.name}"${yr ? ` (${yr})` : ""}.`;
 
-      // Anecdotes factuelles
       const anecdotes = [];
-      if (mbRecording?.length) anecdotes.push(`Durée officielle : ${Math.floor(mbRecording.length/60000)}m${String(Math.floor((mbRecording.length%60000)/1000)).padStart(2,"0")}s.`);
+      if (mbRecording?.length) anecdotes.push(`Durée officielle : ${Math.floor(mbRecording.length / 60000)}m${String(Math.floor((mbRecording.length % 60000) / 1000)).padStart(2, "0")}s.`);
       if (mbRecording?.releases?.[0]?.date) anecdotes.push(`Date de sortie officielle : ${mbRecording.releases[0].date}.`);
       if (mbRecording?.releases?.[0]?.country) anecdotes.push(`Pays de sortie : ${mbRecording.releases[0].country}.`);
-      if (lfmTrack?.track?.playcount) anecdotes.push(`Ce titre totalise ${Number(lfmTrack.track.playcount).toLocaleString("fr-BE")} écoutes sur Last.fm.`);
-      if (lfmArtist?.artist?.stats?.listeners) anecdotes.push(`${Number(lfmArtist.artist.stats.listeners).toLocaleString("fr-BE")} auditeurs uniques sur Last.fm.`);
+      if (lfmTrack?.playcount) anecdotes.push(`Ce titre totalise ${Number(lfmTrack.playcount).toLocaleString("fr-BE")} écoutes sur Last.fm.`);
+      if (lfmArtist?.stats?.listeners) anecdotes.push(`${Number(lfmArtist.stats.listeners).toLocaleString("fr-BE")} auditeurs uniques sur Last.fm.`);
 
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
     } catch (e) {
-      console.error("generateAiContent error:", e);
       setAiContent({ bio: "Données indisponibles.", explication: "", anecdotes: [], genre: "—", ambiance: "—" });
     }
     setAiLoading(false);
   };
 
-  // ── Polling ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!token) return;
     fetchCurrent();
     fetchSpotifyStats();
     fetchLastfmStats();
-    pollRef.current = setInterval(() => {
-      fetchCurrent();
-      fetchLastfmStats();
-    }, 15000);
+    pollRef.current = setInterval(() => { fetchCurrent(); fetchLastfmStats(); }, 15000);
     return () => clearInterval(pollRef.current);
   }, [token, fetchCurrent, fetchSpotifyStats, fetchLastfmStats]);
 
-  // ── Progress bar animation ─────────────────────────────────────────────────
   useEffect(() => {
     if (!isPlaying || !current) return;
     progressRef.current = setInterval(() => {
@@ -377,119 +313,78 @@ AMBIANCE
     return () => clearInterval(progressRef.current);
   }, [isPlaying, current]);
 
-  // ── Save config ───────────────────────────────────────────────────────────
   const saveConfig = () => {
-    if (clientIdInput) { localStorage.setItem(SPOTIFY_CLIENT_ID_KEY, clientIdInput); setClientId(clientIdInput); }
     if (lastfmKeyInput) { localStorage.setItem("spotilive_lastfm_key", lastfmKeyInput); setLastfmKey(lastfmKeyInput); }
     if (lastfmUserInput) { localStorage.setItem("spotilive_lastfm_user", lastfmUserInput); setLastfmUser(lastfmUserInput); }
     setShowConfig(false);
   };
 
-  // ── Logout ────────────────────────────────────────────────────────────────
   const logout = () => {
-    setToken(null);
-    sessionStorage.removeItem("spotify_token");
-    setCurrent(null);
-    setAiContent(null);
-    setTrackStats(null);
+    setToken(null); sessionStorage.removeItem("spotify_token");
+    setCurrent(null); setAiContent(null); setTrackStats(null);
   };
 
   const pct = current ? (progress / current.duration_ms) * 100 : 0;
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // RENDER: LOGIN SCREEN
-  // ─────────────────────────────────────────────────────────────────────────
   if (!token) {
     return (
       <div style={styles.configScreen}>
         <div style={styles.configCard}>
           <div style={styles.logo}>SpotiLive</div>
           <p style={styles.configSubtitle}>Votre musique, enrichie en temps réel</p>
-
           <button style={styles.btnSpotify} onClick={handleSpotifyLogin}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style={{ marginRight: 10 }}>
               <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
             </svg>
             Se connecter avec Spotify
           </button>
-
           <div style={styles.divider}><span style={styles.dividerText}>Last.fm (optionnel)</span></div>
-
           <div style={styles.configSection}>
-            <input
-              style={styles.configInput}
-              placeholder="Clé API Last.fm"
-              value={lastfmKeyInput}
-              onChange={e => setLastfmKeyInput(e.target.value)}
-            />
-            <input
-              style={{ ...styles.configInput, marginTop: 8 }}
-              placeholder="Username Last.fm"
-              value={lastfmUserInput}
-              onChange={e => setLastfmUserInput(e.target.value)}
-            />
+            <input style={styles.configInput} placeholder="Clé API Last.fm" value={lastfmKeyInput} onChange={e => setLastfmKeyInput(e.target.value)} />
+            <input style={{ ...styles.configInput, marginTop: 8 }} placeholder="Username Last.fm" value={lastfmUserInput} onChange={e => setLastfmUserInput(e.target.value)} />
             {(lastfmKeyInput || lastfmUserInput) && (
               <button style={{ ...styles.btnPrimary, marginTop: 8 }} onClick={() => {
                 if (lastfmKeyInput) { localStorage.setItem("spotilive_lastfm_key", lastfmKeyInput); setLastfmKey(lastfmKeyInput); }
                 if (lastfmUserInput) { localStorage.setItem("spotilive_lastfm_user", lastfmUserInput); setLastfmUser(lastfmUserInput); }
-              }}>
-                Sauvegarder Last.fm
-              </button>
+              }}>Sauvegarder Last.fm</button>
             )}
-            <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer" style={styles.configLink}>
-              → Obtenir une clé API Last.fm (gratuit)
-            </a>
+            <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer" style={styles.configLink}>→ Obtenir une clé API Last.fm (gratuit)</a>
           </div>
         </div>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&family=DM+Mono:wght@300;400&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; }`}</style>
       </div>
     );
   }
 
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // RENDER: MAIN APP
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div style={styles.app}>
-      {/* Ambient background from album art */}
       {current?.album?.images?.[0]?.url && (
         <div style={{ ...styles.ambientBg, backgroundImage: `url(${current.album.images[0].url})` }} />
       )}
       <div style={styles.overlay} />
 
-      {/* Header */}
       <header style={styles.header}>
         <div style={styles.headerLogo}>SpotiLive</div>
         <div style={styles.headerRight}>
           {lastfmProfile && (
-            <span style={styles.lfmBadge}>
-              📻 {lastfmProfile.name} · {fmtNum(lastfmProfile.playcount)} écoutes
-            </span>
+            <span style={styles.lfmBadge}>📻 {lastfmProfile.name} · {fmtNum(lastfmProfile.playcount)} écoutes</span>
           )}
-          <button style={styles.btnIcon} onClick={() => setShowConfig(true)} title="Configuration">⚙</button>
-          <button style={styles.btnIcon} onClick={logout} title="Déconnexion">✕</button>
+          <button style={styles.btnIcon} onClick={() => setShowConfig(true)}>⚙</button>
+          <button style={styles.btnIcon} onClick={logout}>✕</button>
         </div>
       </header>
 
-      {/* Tabs */}
       <nav style={styles.tabs}>
         {["now", "stats", "history"].map(tab => (
-          <button
-            key={tab}
-            style={{ ...styles.tab, ...(activeTab === tab ? styles.tabActive : {}) }}
-            onClick={() => setActiveTab(tab)}
-          >
+          <button key={tab} style={{ ...styles.tab, ...(activeTab === tab ? styles.tabActive : {}) }} onClick={() => setActiveTab(tab)}>
             {{ now: "En cours", stats: "Statistiques", history: "Historique" }[tab]}
           </button>
         ))}
       </nav>
 
       <main style={styles.main}>
-
-        {/* ── NOW PLAYING ── */}
         {activeTab === "now" && (
           <div style={styles.nowGrid}>
-            {/* Left: Player */}
             <div style={styles.playerCol}>
               {current ? (
                 <>
@@ -502,15 +397,11 @@ AMBIANCE
                     <p style={styles.artistName}>{current.artists.map(a => a.name).join(", ")}</p>
                     <p style={styles.albumName}>{current.album.name} · {current.album.release_date?.slice(0, 4)}</p>
                   </div>
-                  {/* Progress */}
                   <div style={styles.progressWrap}>
                     <span style={styles.timeLabel}>{msToTime(progress)}</span>
-                    <div style={styles.progressBar}>
-                      <div style={{ ...styles.progressFill, width: `${pct}%` }} />
-                    </div>
+                    <div style={styles.progressBar}><div style={{ ...styles.progressFill, width: `${pct}%` }} /></div>
                     <span style={styles.timeLabel}>{msToTime(current.duration_ms)}</span>
                   </div>
-                  {/* Quick stats row */}
                   <div style={styles.quickStats}>
                     {[
                       ["Popularité", current.popularity ? `${current.popularity}/100` : "—"],
@@ -524,13 +415,10 @@ AMBIANCE
                       </div>
                     ))}
                   </div>
-                  {/* Popularity bar */}
                   {current.popularity > 0 && (
                     <div style={styles.popWrap}>
                       <span style={styles.popLabel}>Popularité Spotify</span>
-                      <div style={styles.popBar}>
-                        <div style={{ ...styles.popFill, width: `${current.popularity}%` }} />
-                      </div>
+                      <div style={styles.popBar}><div style={{ ...styles.popFill, width: `${current.popularity}%` }} /></div>
                     </div>
                   )}
                 </>
@@ -543,7 +431,6 @@ AMBIANCE
               )}
             </div>
 
-            {/* Right: AI Content */}
             <div style={styles.aiCol}>
               {aiLoading ? (
                 <div style={styles.aiLoading}>
@@ -565,33 +452,26 @@ AMBIANCE
                       <h3 style={styles.aiTitle}>Anecdotes</h3>
                       <ul style={styles.anecdoteList}>
                         {aiContent.anecdotes.map((a, i) => (
-                          <li key={i} style={styles.anecdoteItem}>
-                            <span style={styles.anecdoteDot}>✦</span>
-                            {a}
-                          </li>
+                          <li key={i} style={styles.anecdoteItem}><span style={styles.anecdoteDot}>✦</span>{a}</li>
                         ))}
                       </ul>
                     </div>
                   )}
-                  {/* Last.fm track stats */}
                   {trackStats?.lastfm && (
                     <div style={styles.aiBlock}>
                       <h3 style={styles.aiTitle}>Données Last.fm</h3>
                       <div style={styles.lfmGrid}>
                         <div style={styles.lfmStat}><span style={styles.lfmVal}>{fmtNum(trackStats.lastfm.playcount)}</span><span style={styles.lfmLbl}>écoutes globales</span></div>
                         <div style={styles.lfmStat}><span style={styles.lfmVal}>{fmtNum(trackStats.lastfm.listeners)}</span><span style={styles.lfmLbl}>auditeurs</span></div>
-                        {trackStats.lastfm.userplaycount && <div style={styles.lfmStat}><span style={styles.lfmVal}>{fmtNum(trackStats.lastfm.userplaycount)}</span><span style={styles.lfmLbl}>vos écoutes</span></div>}
+                        {trackStats.lastfm.userplaycount > 0 && <div style={styles.lfmStat}><span style={styles.lfmVal}>{fmtNum(trackStats.lastfm.userplaycount)}</span><span style={styles.lfmLbl}>vos écoutes</span></div>}
                       </div>
                       {trackStats.lastfm.toptags?.tag?.length > 0 && (
                         <div style={styles.tagsRow}>
-                          {trackStats.lastfm.toptags.tag.slice(0, 5).map(t => (
-                            <span key={t.name} style={styles.tag}>{t.name}</span>
-                          ))}
+                          {trackStats.lastfm.toptags.tag.slice(0, 5).map(t => <span key={t.name} style={styles.tag}>{t.name}</span>)}
                         </div>
                       )}
                     </div>
                   )}
-                  {/* Artiste Last.fm */}
                   {artistStats?.lastfm && (
                     <div style={styles.aiBlock}>
                       <h3 style={styles.aiTitle}>Artiste · Last.fm</h3>
@@ -601,35 +481,31 @@ AMBIANCE
                       </div>
                     </div>
                   )}
+                  {geminiDebug && (
+                    <div style={{ ...styles.aiBlock, borderColor: "rgba(255,100,100,.3)" }}>
+                      <h3 style={{ ...styles.aiTitle, color: "#ff6b6b" }}>Debug Gemini</h3>
+                      <p style={{ fontSize: 10, opacity: 0.7, wordBreak: "break-all", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                        {geminiDebug.error ? "ERREUR: " + geminiDebug.error : (geminiDebug.parseError ? "PARSE ERROR: " + geminiDebug.parseError + "\n\nRAW:\n" + geminiDebug.raw : geminiDebug.raw) || "Réponse vide"}
+                      </p>
+                    </div>
+                  )}
                 </>
-              ) : !current ? (
+              ) : current ? null : (
                 <div style={styles.aiPlaceholder}>
                   <p>Les informations sur la chanson apparaîtront ici</p>
                 </div>
-              {geminiDebug && (
-                <div style={{...styles.aiBlock, borderColor: "rgba(255,100,100,.3)", marginTop: 8}}>
-                  <p style={{...styles.aiTitle, color: "#ff6b6b"}}>DEBUG GEMINI</p>
-                  <p style={{fontSize: 10, opacity: 0.7, wordBreak: "break-all", whiteSpace: "pre-wrap"}}>
-                    {geminiDebug.error ? "ERREUR: " + geminiDebug.error : geminiDebug.raw || "Réponse vide"}
-                  </p>
-                </div>
               )}
-              ) : null}
             </div>
           </div>
         )}
 
-        {/* ── STATS ── */}
         {activeTab === "stats" && (
           <div style={styles.statsGrid}>
-            {/* Last.fm profile */}
             {lastfmProfile && (
               <div style={styles.statCard}>
                 <h3 style={styles.cardTitle}>📻 Profil Last.fm</h3>
                 <div style={styles.profileRow}>
-                  {lastfmProfile.image?.[2]?.["#text"] && (
-                    <img src={lastfmProfile.image[2]["#text"]} alt="Avatar" style={styles.avatar} />
-                  )}
+                  {lastfmProfile.image?.[2]?.["#text"] && <img src={lastfmProfile.image[2]["#text"]} alt="Avatar" style={styles.avatar} />}
                   <div>
                     <p style={styles.profileName}>{lastfmProfile.name}</p>
                     <p style={styles.profileSub}>{fmtNum(lastfmProfile.playcount)} écoutes au total</p>
@@ -639,8 +515,6 @@ AMBIANCE
                 </div>
               </div>
             )}
-
-            {/* Top Tracks 4 semaines */}
             {topTracks.length > 0 && (
               <div style={styles.statCard}>
                 <h3 style={styles.cardTitle}>🔥 Top titres · 4 semaines</h3>
@@ -659,8 +533,6 @@ AMBIANCE
                 </ol>
               </div>
             )}
-
-            {/* Top Artists */}
             {topArtists.length > 0 && (
               <div style={styles.statCard}>
                 <h3 style={styles.cardTitle}>⭐ Top artistes · 4 semaines</h3>
@@ -681,12 +553,11 @@ AMBIANCE
           </div>
         )}
 
-        {/* ── HISTORY ── */}
         {activeTab === "history" && (
           <div style={styles.historyWrap}>
             <h3 style={styles.cardTitle}>🕐 Dernières écoutes · Last.fm</h3>
             {recentTracks.length === 0 ? (
-              <p style={{ opacity: 0.5 }}>Aucune donnée Last.fm. Configurez votre clé et username Last.fm.</p>
+              <p style={{ opacity: 0.5, marginTop: 12 }}>Configurez votre username Last.fm via ⚙</p>
             ) : (
               <div style={styles.historyList}>
                 {recentTracks.map((t, i) => (
@@ -696,9 +567,7 @@ AMBIANCE
                       <span style={styles.historyTitle}>{t.name}</span>
                       <span style={styles.historySub}>{t.artist?.["#text"] || t.artist?.name} · {t.album?.["#text"]}</span>
                     </div>
-                    <span style={styles.historyTime}>
-                      {t["@attr"]?.nowplaying ? "▶ En cours" : t.date?.["#text"] ? t.date["#text"].slice(0, -6) : ""}
-                    </span>
+                    <span style={styles.historyTime}>{t["@attr"]?.nowplaying ? "▶" : t.date?.["#text"]?.slice(0, -6) || ""}</span>
                   </div>
                 ))}
               </div>
@@ -707,15 +576,10 @@ AMBIANCE
         )}
       </main>
 
-      {/* Config Modal */}
       {showConfig && (
         <div style={styles.modalOverlay} onClick={() => setShowConfig(false)}>
           <div style={styles.modal} onClick={e => e.stopPropagation()}>
             <h2 style={styles.modalTitle}>Configuration</h2>
-            <div style={styles.configSection}>
-              <label style={styles.configLabel}>Spotify Client ID</label>
-              <input style={styles.configInput} placeholder={clientId ? "••••••••••••" : "Client ID"} value={clientIdInput} onChange={e => setClientIdInput(e.target.value)} />
-            </div>
             <div style={styles.configSection}>
               <label style={styles.configLabel}>Last.fm API Key</label>
               <input style={styles.configInput} placeholder={lastfmKey ? "••••••••••••" : "API Key"} value={lastfmKeyInput} onChange={e => setLastfmKeyInput(e.target.value)} />
@@ -733,350 +597,109 @@ AMBIANCE
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&family=DM+Mono:wght@300;400&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.05)} }
         @keyframes ring { 0%{transform:scale(1);opacity:.8} 100%{transform:scale(1.15);opacity:0} }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 2px; }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 2px; }
       `}</style>
     </div>
   );
 }
 
-// ─── STYLES ────────────────────────────────────────────────────────────────────
 const styles = {
-  app: {
-    minHeight: "100vh",
-    background: "#0a0a0f",
-    color: "#f0ede8",
-    fontFamily: "'DM Mono', monospace",
-    position: "relative",
-    overflow: "hidden",
-  },
-  ambientBg: {
-    position: "fixed", inset: 0,
-    backgroundSize: "cover", backgroundPosition: "center",
-    filter: "blur(80px) saturate(1.8)",
-    opacity: 0.12,
-    transform: "scale(1.1)",
-    transition: "background-image 2s ease",
-    zIndex: 0,
-  },
-  overlay: {
-    position: "fixed", inset: 0,
-    background: "linear-gradient(180deg, rgba(10,10,15,.95) 0%, rgba(10,10,15,.85) 100%)",
-    zIndex: 1,
-  },
-  header: {
-    position: "relative", zIndex: 10,
-    display: "flex", alignItems: "center", justifyContent: "space-between",
-    padding: "14px 16px",
-    borderBottom: "1px solid rgba(255,255,255,.06)",
-    backdropFilter: "blur(20px)",
-  },
-  headerLogo: {
-    fontFamily: "'Fraunces', serif",
-    fontSize: 22, fontWeight: 600,
-    letterSpacing: "-0.5px",
-    background: "linear-gradient(135deg, #1db954, #1ed760)",
-    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-  },
+  app: { minHeight: "100vh", background: "#0a0a0f", color: "#f0ede8", fontFamily: "'DM Mono', monospace", position: "relative", overflow: "hidden" },
+  ambientBg: { position: "fixed", inset: 0, backgroundSize: "cover", backgroundPosition: "center", filter: "blur(80px) saturate(1.8)", opacity: 0.12, transform: "scale(1.1)", transition: "background-image 2s ease", zIndex: 0 },
+  overlay: { position: "fixed", inset: 0, background: "linear-gradient(180deg, rgba(10,10,15,.95) 0%, rgba(10,10,15,.85) 100%)", zIndex: 1 },
+  header: { position: "relative", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.06)", backdropFilter: "blur(20px)" },
+  headerLogo: { fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, letterSpacing: "-0.5px", background: "linear-gradient(135deg, #1db954, #1ed760)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
   headerRight: { display: "flex", alignItems: "center", gap: 12 },
-  lfmBadge: {
-    fontSize: 11, opacity: 0.6,
-    background: "rgba(255,255,255,.06)",
-    padding: "5px 10px", borderRadius: 20,
-  },
-  btnIcon: {
-    background: "rgba(255,255,255,.08)", border: "none",
-    color: "#f0ede8", cursor: "pointer",
-    width: 32, height: 32, borderRadius: "50%",
-    fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
-  },
-  tabs: {
-    position: "relative", zIndex: 10,
-    display: "flex", gap: 4, padding: "12px 28px 0",
-  },
-  tab: {
-    background: "none", border: "none", color: "rgba(240,237,232,.4)",
-    cursor: "pointer", fontSize: 13,
-    padding: "8px 16px", borderRadius: "8px 8px 0 0",
-    fontFamily: "'DM Mono', monospace",
-    transition: "all .2s",
-  },
-  tabActive: {
-    background: "rgba(255,255,255,.06)",
-    color: "#f0ede8",
-    borderBottom: "2px solid #1db954",
-  },
-  main: {
-    position: "relative", zIndex: 10,
-    padding: "16px",
-    maxWidth: 1200, margin: "0 auto",
-  },
-  // NOW PLAYING
-  nowGrid: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 20,
-    maxWidth: 600,
-    margin: "0 auto",
-    width: "100%",
-  },
-  playerCol: {
-    display: "flex", flexDirection: "column", gap: 16,
-    alignItems: "center",
-  },
-  albumWrap: {
-    position: "relative", alignSelf: "center",
-    width: 220, height: 220,
-  },
-  albumArt: {
-    width: "100%", height: "100%",
-    borderRadius: 16,
-    boxShadow: "0 20px 60px rgba(0,0,0,.6)",
-    position: "relative", zIndex: 2,
-  },
-  playingRing: {
-    position: "absolute", inset: -8,
-    border: "2px solid #1db954",
-    borderRadius: 24,
-    animation: "ring 2s ease-out infinite",
-    zIndex: 1,
-  },
+  lfmBadge: { fontSize: 11, opacity: 0.6, background: "rgba(255,255,255,.06)", padding: "5px 10px", borderRadius: 20 },
+  btnIcon: { background: "rgba(255,255,255,.08)", border: "none", color: "#f0ede8", cursor: "pointer", width: 32, height: 32, borderRadius: "50%", fontSize: 14 },
+  tabs: { position: "relative", zIndex: 10, display: "flex", gap: 4, padding: "12px 16px 0" },
+  tab: { background: "none", border: "none", color: "rgba(240,237,232,.4)", cursor: "pointer", fontSize: 13, padding: "8px 16px", borderRadius: "8px 8px 0 0", fontFamily: "'DM Mono', monospace", transition: "all .2s" },
+  tabActive: { background: "rgba(255,255,255,.06)", color: "#f0ede8", borderBottom: "2px solid #1db954" },
+  main: { position: "relative", zIndex: 10, padding: "16px", maxWidth: 1200, margin: "0 auto" },
+  nowGrid: { display: "flex", flexDirection: "column", gap: 20, maxWidth: 600, margin: "0 auto", width: "100%" },
+  playerCol: { display: "flex", flexDirection: "column", gap: 16, alignItems: "center" },
+  albumWrap: { position: "relative", alignSelf: "center", width: 220, height: 220 },
+  albumArt: { width: "100%", height: "100%", borderRadius: 16, boxShadow: "0 20px 60px rgba(0,0,0,.6)", position: "relative", zIndex: 2 },
+  playingRing: { position: "absolute", inset: -8, border: "2px solid #1db954", borderRadius: 24, animation: "ring 2s ease-out infinite", zIndex: 1 },
   trackInfo: { textAlign: "center", width: "100%" },
-  trackName: {
-    fontFamily: "'Fraunces', serif",
-    fontSize: 22, fontWeight: 600,
-    lineHeight: 1.2, marginBottom: 6,
-  },
+  trackName: { fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, lineHeight: 1.2, marginBottom: 6 },
   artistName: { fontSize: 15, opacity: 0.8, marginBottom: 4 },
   albumName: { fontSize: 12, opacity: 0.45 },
-  progressWrap: {
-    display: "flex", alignItems: "center", gap: 8,
-    width: "100%",
-  },
-  progressBar: {
-    flex: 1, height: 3,
-    background: "rgba(255,255,255,.12)",
-    borderRadius: 2, overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    background: "linear-gradient(90deg, #1db954, #1ed760)",
-    borderRadius: 2,
-    transition: "width 1s linear",
-  },
+  progressWrap: { display: "flex", alignItems: "center", gap: 8, width: "100%" },
+  progressBar: { flex: 1, height: 3, background: "rgba(255,255,255,.12)", borderRadius: 2, overflow: "hidden" },
+  progressFill: { height: "100%", background: "linear-gradient(90deg, #1db954, #1ed760)", borderRadius: 2, transition: "width 1s linear" },
   timeLabel: { fontSize: 11, opacity: 0.45, fontVariantNumeric: "tabular-nums" },
-  quickStats: {
-    display: "grid", gridTemplateColumns: "1fr 1fr",
-    gap: 8, width: "100%",
-  },
-  quickStat: {
-    background: "rgba(255,255,255,.04)",
-    borderRadius: 10, padding: "10px 14px",
-    display: "flex", flexDirection: "column", gap: 3,
-  },
+  quickStats: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, width: "100%" },
+  quickStat: { background: "rgba(255,255,255,.04)", borderRadius: 10, padding: "10px 14px", display: "flex", flexDirection: "column", gap: 3 },
   qsLabel: { fontSize: 10, opacity: 0.4, textTransform: "uppercase", letterSpacing: 1 },
   qsValue: { fontSize: 14, fontWeight: 500 },
-  popWrap: { display: "flex", flexDirection: "column", gap: 6 },
+  popWrap: { display: "flex", flexDirection: "column", gap: 6, width: "100%" },
   popLabel: { fontSize: 10, opacity: 0.4, textTransform: "uppercase", letterSpacing: 1 },
-  popBar: {
-    height: 4, background: "rgba(255,255,255,.08)",
-    borderRadius: 2, overflow: "hidden",
-  },
-  popFill: {
-    height: "100%",
-    background: "linear-gradient(90deg, #1db954, #1ed760)",
-    borderRadius: 2,
-  },
-  nothing: {
-    textAlign: "center", opacity: 0.4,
-    padding: "60px 20px", display: "flex",
-    flexDirection: "column", gap: 12, alignItems: "center",
-  },
+  popBar: { height: 4, background: "rgba(255,255,255,.08)", borderRadius: 2, overflow: "hidden" },
+  popFill: { height: "100%", background: "linear-gradient(90deg, #1db954, #1ed760)", borderRadius: 2 },
+  nothing: { textAlign: "center", opacity: 0.4, padding: "60px 20px", display: "flex", flexDirection: "column", gap: 12, alignItems: "center" },
   nothingIcon: { fontSize: 48 },
-  // AI COL
-  aiCol: {
-    display: "flex", flexDirection: "column", gap: 14,
-    width: "100%",
-  },
-  aiLoading: {
-    display: "flex", flexDirection: "column", alignItems: "center",
-    gap: 16, padding: 60, opacity: 0.5,
-  },
-  aiSpinner: {
-    width: 28, height: 28,
-    border: "2px solid rgba(255,255,255,.2)",
-    borderTopColor: "#1db954",
-    borderRadius: "50%",
-    animation: "spin 1s linear infinite",
-  },
-  aiBlock: {
-    background: "rgba(255,255,255,.04)",
-    borderRadius: 14, padding: "18px 20px",
-    border: "1px solid rgba(255,255,255,.06)",
-  },
-  aiTitle: {
-    fontSize: 10, fontWeight: 400,
-    textTransform: "uppercase", letterSpacing: 2,
-    opacity: 0.4, marginBottom: 10, color: "#1db954",
-  },
-  aiText: { fontSize: 14, lineHeight: 1.7, opacity: 0.85 },
+  aiCol: { display: "flex", flexDirection: "column", gap: 14, width: "100%" },
+  aiLoading: { display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: 60, opacity: 0.5 },
+  aiSpinner: { width: 28, height: 28, border: "2px solid rgba(255,255,255,.2)", borderTopColor: "#1db954", borderRadius: "50%", animation: "spin 1s linear infinite" },
+  aiBlock: { background: "rgba(255,255,255,.04)", borderRadius: 14, padding: "18px 20px", border: "1px solid rgba(255,255,255,.06)" },
+  aiTitle: { fontSize: 10, fontWeight: 400, textTransform: "uppercase", letterSpacing: 2, opacity: 0.4, marginBottom: 10, color: "#1db954" },
+  aiText: { fontSize: 14, lineHeight: 1.8, opacity: 0.85 },
   anecdoteList: { listStyle: "none", display: "flex", flexDirection: "column", gap: 10 },
-  anecdoteItem: {
-    display: "flex", gap: 10, fontSize: 13, lineHeight: 1.6, opacity: 0.8,
-  },
+  anecdoteItem: { display: "flex", gap: 10, fontSize: 13, lineHeight: 1.6, opacity: 0.8 },
   anecdoteDot: { color: "#1db954", flexShrink: 0, marginTop: 2 },
   lfmGrid: { display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 },
   lfmStat: { display: "flex", flexDirection: "column", gap: 2 },
   lfmVal: { fontSize: 18, fontFamily: "'Fraunces', serif", fontWeight: 600 },
   lfmLbl: { fontSize: 10, opacity: 0.4 },
   tagsRow: { display: "flex", flexWrap: "wrap", gap: 6 },
-  tag: {
-    fontSize: 11, padding: "3px 8px",
-    background: "rgba(29,185,84,.12)",
-    color: "#1db954", borderRadius: 20,
-  },
-  aiPlaceholder: {
-    padding: 40, textAlign: "center",
-    opacity: 0.3, fontSize: 13,
-  },
-  // STATS
-  statsGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-    gap: 20,
-  },
-  statCard: {
-    background: "rgba(255,255,255,.04)",
-    borderRadius: 16, padding: "20px",
-    border: "1px solid rgba(255,255,255,.06)",
-  },
-  cardTitle: {
-    fontSize: 13, fontWeight: 400,
-    marginBottom: 16, opacity: 0.7,
-    fontFamily: "'Fraunces', serif",
-  },
+  tag: { fontSize: 11, padding: "3px 8px", background: "rgba(29,185,84,.12)", color: "#1db954", borderRadius: 20 },
+  aiPlaceholder: { padding: 40, textAlign: "center", opacity: 0.3, fontSize: 13 },
+  statsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20 },
+  statCard: { background: "rgba(255,255,255,.04)", borderRadius: 16, padding: "20px", border: "1px solid rgba(255,255,255,.06)" },
+  cardTitle: { fontSize: 13, fontWeight: 400, marginBottom: 16, opacity: 0.7, fontFamily: "'Fraunces', serif" },
   profileRow: { display: "flex", gap: 14, alignItems: "center" },
   avatar: { width: 52, height: 52, borderRadius: "50%" },
   profileName: { fontSize: 16, fontWeight: 600, marginBottom: 4 },
   profileSub: { fontSize: 12, opacity: 0.5, lineHeight: 1.8 },
   rankList: { listStyle: "none", display: "flex", flexDirection: "column", gap: 8 },
-  rankItem: {
-    display: "flex", alignItems: "center", gap: 10,
-    padding: "6px 0",
-    borderBottom: "1px solid rgba(255,255,255,.04)",
-  },
+  rankItem: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,.04)" },
   rankNum: { fontSize: 11, opacity: 0.3, width: 18, textAlign: "right" },
   rankThumb: { width: 36, height: 36, borderRadius: 6 },
   rankInfo: { flex: 1, minWidth: 0 },
   rankTitle: { display: "block", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   rankSub: { display: "block", fontSize: 11, opacity: 0.4 },
-  rankPop: { fontSize: 11, opacity: 0.35, fontVariantNumeric: "tabular-nums" },
+  rankPop: { fontSize: 11, opacity: 0.35 },
   artistsGrid: { display: "flex", flexDirection: "column", gap: 8 },
-  artistChip: {
-    display: "flex", alignItems: "center", gap: 10,
-    padding: "6px 0",
-    borderBottom: "1px solid rgba(255,255,255,.04)",
-  },
+  artistChip: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,.04)" },
   artistThumb: { width: 38, height: 38, borderRadius: "50%" },
   artistChipName: { fontSize: 13 },
   artistChipSub: { fontSize: 11, opacity: 0.4 },
   rankNumSm: { fontSize: 11, opacity: 0.25, marginLeft: "auto" },
-  // HISTORY
-  historyWrap: {
-    background: "rgba(255,255,255,.04)",
-    borderRadius: 16, padding: "20px",
-    border: "1px solid rgba(255,255,255,.06)",
-  },
+  historyWrap: { background: "rgba(255,255,255,.04)", borderRadius: 16, padding: "20px", border: "1px solid rgba(255,255,255,.06)" },
   historyList: { display: "flex", flexDirection: "column", gap: 2, marginTop: 12 },
-  historyItem: {
-    display: "flex", alignItems: "center", gap: 12,
-    padding: "10px 0",
-    borderBottom: "1px solid rgba(255,255,255,.04)",
-  },
+  historyItem: { display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,.04)" },
   historyThumb: { width: 40, height: 40, borderRadius: 6, flexShrink: 0 },
   historyInfo: { flex: 1, minWidth: 0 },
   historyTitle: { display: "block", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   historySub: { display: "block", fontSize: 11, opacity: 0.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   historyTime: { fontSize: 11, opacity: 0.35, flexShrink: 0 },
-  // CONFIG SCREEN
-  configScreen: {
-    minHeight: "100vh",
-    background: "#0a0a0f",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontFamily: "'DM Mono', monospace",
-  },
-  configCard: {
-    background: "rgba(255,255,255,.04)",
-    border: "1px solid rgba(255,255,255,.08)",
-    borderRadius: 20, padding: "40px",
-    maxWidth: 480, width: "90%",
-    display: "flex", flexDirection: "column", gap: 24,
-  },
-  logo: {
-    fontFamily: "'Fraunces', serif",
-    fontSize: 32, fontWeight: 600,
-    background: "linear-gradient(135deg, #1db954, #1ed760)",
-    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-    textAlign: "center",
-  },
+  configScreen: { minHeight: "100vh", background: "#0a0a0f", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Mono', monospace" },
+  configCard: { background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 20, padding: "40px", maxWidth: 480, width: "90%", display: "flex", flexDirection: "column", gap: 24 },
+  logo: { fontFamily: "'Fraunces', serif", fontSize: 32, fontWeight: 600, background: "linear-gradient(135deg, #1db954, #1ed760)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", textAlign: "center" },
   configSubtitle: { textAlign: "center", opacity: 0.5, fontSize: 13, color: "#f0ede8" },
   configSection: { display: "flex", flexDirection: "column", gap: 6 },
   configLabel: { fontSize: 12, opacity: 0.6, color: "#f0ede8" },
-  optional: { fontSize: 10, opacity: 0.4, marginLeft: 6 },
-  configInput: {
-    background: "rgba(255,255,255,.06)",
-    border: "1px solid rgba(255,255,255,.12)",
-    borderRadius: 10, padding: "12px 14px",
-    color: "#f0ede8", fontSize: 13,
-    fontFamily: "'DM Mono', monospace",
-    outline: "none",
-  },
+  configInput: { background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 10, padding: "12px 14px", color: "#f0ede8", fontSize: 13, fontFamily: "'DM Mono', monospace", outline: "none" },
   configLink: { fontSize: 12, color: "#1db954", textDecoration: "none", opacity: 0.8 },
   divider: { display: "flex", alignItems: "center", gap: 12, margin: "4px 0" },
   dividerText: { fontSize: 11, opacity: 0.35, whiteSpace: "nowrap", color: "#f0ede8" },
-  configHint: { fontSize: 11, opacity: 0.4, color: "#f0ede8", lineHeight: 1.6 },
-  code: {
-    background: "rgba(255,255,255,.08)", padding: "2px 6px",
-    borderRadius: 4, fontSize: 10, color: "#1db954",
-  },
-  btnPrimary: {
-    background: "linear-gradient(135deg, #1db954, #1ed760)",
-    border: "none", borderRadius: 12,
-    padding: "14px 28px", color: "#000",
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 13, fontWeight: 500,
-    cursor: "pointer", width: "100%",
-  },
-  btnSpotify: {
-    background: "#1db954", border: "none", borderRadius: 12,
-    padding: "14px 28px", color: "#fff",
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 14, fontWeight: 500,
-    cursor: "pointer", width: "100%",
-    display: "flex", alignItems: "center", justifyContent: "center",
-  },
-  btnSecondary: {
-    background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)",
-    borderRadius: 12, padding: "12px 20px",
-    color: "#f0ede8", fontFamily: "'DM Mono', monospace",
-    fontSize: 13, cursor: "pointer",
-  },
-  // MODAL
-  modalOverlay: {
-    position: "fixed", inset: 0,
-    background: "rgba(0,0,0,.7)", backdropFilter: "blur(8px)",
-    zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-  },
-  modal: {
-    background: "#13131a", border: "1px solid rgba(255,255,255,.1)",
-    borderRadius: 20, padding: "32px",
-    maxWidth: 420, width: "90%",
-    fontFamily: "'DM Mono', monospace", color: "#f0ede8",
-  },
-  modalTitle: {
-    fontFamily: "'Fraunces', serif", fontSize: 20,
-    marginBottom: 20,
-  },
+  btnPrimary: { background: "linear-gradient(135deg, #1db954, #1ed760)", border: "none", borderRadius: 12, padding: "14px 28px", color: "#000", fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 500, cursor: "pointer", width: "100%" },
+  btnSpotify: { background: "#1db954", border: "none", borderRadius: 12, padding: "14px 28px", color: "#fff", fontFamily: "'DM Mono', monospace", fontSize: 14, fontWeight: 500, cursor: "pointer", width: "100%", display: "flex", alignItems: "center", justifyContent: "center" },
+  btnSecondary: { background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 12, padding: "12px 20px", color: "#f0ede8", fontFamily: "'DM Mono', monospace", fontSize: 13, cursor: "pointer" },
+  modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", backdropFilter: "blur(8px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" },
+  modal: { background: "#13131a", border: "1px solid rgba(255,255,255,.1)", borderRadius: 20, padding: "32px", maxWidth: 420, width: "90%", fontFamily: "'DM Mono', monospace", color: "#f0ede8" },
+  modalTitle: { fontFamily: "'Fraunces', serif", fontSize: 20, marginBottom: 20 },
 };
