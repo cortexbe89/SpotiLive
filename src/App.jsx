@@ -582,7 +582,7 @@ ANECDOTES
       <nav style={styles.tabs}>
         {["now", "recs", "stats", "history"].map(tab => (
           <button key={tab} style={{ ...styles.tab, ...(activeTab === tab ? styles.tabActive : {}) }} onClick={() => setActiveTab(tab)}>
-            {{ now: "En cours", recs: "Artistes", stats: "Statistiques", history: "Historique" }[tab]}
+            {{ now: "En cours", recs: "Artistes liés", stats: "Statistiques", history: "Historique" }[tab]}
           </button>
         ))}
       </nav>
@@ -759,10 +759,11 @@ ANECDOTES
                   {lfmTopArtists.map((a, i) => (
                     <li key={a.name} style={styles.rankItem}>
                       <span style={styles.rankNum}>{i + 1}</span>
-                      <div style={styles.rankInfo}>
+                      <a href={`https://open.spotify.com/search/${encodeURIComponent(a.name)}`} target="_blank" rel="noreferrer" style={{ ...styles.rankInfo, textDecoration: "none", color: "#f0ede8" }}>
                         <span style={styles.rankTitle}>{a.name}</span>
                         <span style={styles.rankSub}>{fmtNum(a.playcount)} écoutes</span>
-                      </div>
+                      </a>
+                      <span style={styles.recArrow}>▶</span>
                     </li>
                   ))}
                 </ol>
@@ -777,10 +778,11 @@ ANECDOTES
                     <li key={t.name + t.artist?.name} style={styles.rankItem}>
                       <span style={styles.rankNum}>{i + 1}</span>
                       {t.image?.[1]?.["#text"] && <img src={t.image[1]["#text"]} alt="" style={styles.rankThumb} />}
-                      <div style={styles.rankInfo}>
+                      <a href={`https://open.spotify.com/search/${encodeURIComponent(t.name + " " + (t.artist?.name || ""))}`} target="_blank" rel="noreferrer" style={{ ...styles.rankInfo, textDecoration: "none", color: "#f0ede8" }}>
                         <span style={styles.rankTitle}>{t.name}</span>
                         <span style={styles.rankSub}>{t.artist?.name} · {fmtNum(t.playcount)} écoutes</span>
-                      </div>
+                      </a>
+                      <span style={styles.recArrow}>▶</span>
                     </li>
                   ))}
                 </ol>
@@ -795,10 +797,11 @@ ANECDOTES
                     <li key={a.name + a.artist?.name} style={styles.rankItem}>
                       <span style={styles.rankNum}>{i + 1}</span>
                       {a.image?.[1]?.["#text"] && <img src={a.image[1]["#text"]} alt="" style={styles.rankThumb} />}
-                      <div style={styles.rankInfo}>
+                      <a href={`https://open.spotify.com/search/${encodeURIComponent(a.name + " " + (a.artist?.name || ""))}`} target="_blank" rel="noreferrer" style={{ ...styles.rankInfo, textDecoration: "none", color: "#f0ede8" }}>
                         <span style={styles.rankTitle}>{a.name}</span>
                         <span style={styles.rankSub}>{a.artist?.name} · {fmtNum(a.playcount)} écoutes</span>
-                      </div>
+                      </a>
+                      <span style={styles.recArrow}>▶</span>
                     </li>
                   ))}
                 </ol>
@@ -813,11 +816,11 @@ ANECDOTES
                     <li key={t.id} style={styles.rankItem}>
                       <span style={styles.rankNum}>{i + 1}</span>
                       {t.album?.images?.[2]?.url && <img src={t.album.images[2].url} alt="" style={styles.rankThumb} />}
-                      <div style={styles.rankInfo}>
+                      <a href={`https://open.spotify.com/track/${t.id}`} target="_blank" rel="noreferrer" style={{ ...styles.rankInfo, textDecoration: "none", color: "#f0ede8" }}>
                         <span style={styles.rankTitle}>{t.name}</span>
                         <span style={styles.rankSub}>{t.artists[0].name}</span>
-                      </div>
-                      <span style={styles.rankPop}>{t.popularity}</span>
+                      </a>
+                      <span style={styles.recArrow}>▶</span>
                     </li>
                   ))}
                 </ol>
@@ -829,14 +832,14 @@ ANECDOTES
                 <h3 style={styles.cardTitle}>⭐ Top artistes · 4 semaines · Spotify</h3>
                 <div style={styles.artistsGrid}>
                   {topArtists.map((a, i) => (
-                    <div key={a.id} style={styles.artistChip}>
+                    <a key={a.id} href={`https://open.spotify.com/artist/${a.id}`} target="_blank" rel="noreferrer" style={{ ...styles.artistChip, textDecoration: "none", color: "#f0ede8" }}>
                       {a.images?.[2]?.url && <img src={a.images[2].url} alt="" style={styles.artistThumb} />}
-                      <div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={styles.artistChipName}>{a.name}</p>
                         <p style={styles.artistChipSub}>{a.genres?.[0] || "—"}</p>
                       </div>
-                      <span style={styles.rankNumSm}>{i + 1}</span>
-                    </div>
+                      <span style={styles.recArrow}>▶</span>
+                    </a>
                   ))}
                 </div>
               </div>
