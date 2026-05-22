@@ -145,21 +145,9 @@ export default function SpotiLive() {
     return res.json();
   }, [token]);
 
-  const fetchTrackStats = async (track) => {
-    const key = lastfmKey || LASTFM_KEY;
-    try {
-      const r = await lastfmFetch({ method: "track.getInfo", api_key: key, artist: track.artists[0].name, track: track.name, username: lastfmUser || undefined });
-      setTrackStats({ lastfm: r?.track });
-    } catch {}
-  };
 
-  const fetchArtistStats = async (artist) => {
-    const key = lastfmKey || LASTFM_KEY;
-    try {
-      const r = await lastfmFetch({ method: "artist.getInfo", api_key: key, artist: artist.name, lang: "fr" });
-      setArtistStats({ lastfm: r?.artist });
-    } catch {}
-  };
+
+
 
   const fetchLastfmStats = useCallback(async () => {
     if (!lastfmUser) return;
