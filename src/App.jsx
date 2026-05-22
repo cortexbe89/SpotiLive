@@ -208,6 +208,11 @@ export default function SpotiLive() {
       const genre = allGenres[0] || "—";
       const ambiance = allGenres.slice(1, 3).join(", ") || "—";
 
+      // Afficher immédiatement les stats rapides AVANT Groq (pas besoin d'attendre l'IA)
+      setTrackStats({ lastfm: lfmTrack });
+      setArtistStats({ lastfm: lfmArtist });
+      setAiContent(prev => ({ bio: "", explication: "", anecdotes: [], ...(prev || {}), genre, ambiance }));
+
       // 4. Sources brutes pour Groq
       const wikiArtistClean = wikiArtistRaw ? cleanAndTruncate(wikiArtistRaw, 800) : "";
       const wikiTrackClean = wikiTrackRaw ? cleanAndTruncate(wikiTrackRaw, 500) : "";
@@ -334,8 +339,6 @@ ANECDOTES
         if (mbReleases > 1) anecdotes.push(`Ce titre est apparu sur ${mbReleases} sorties selon MusicBrainz.`);
       }
 
-      setTrackStats({ lastfm: lfmTrack });
-      setArtistStats({ lastfm: lfmArtist });
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
     } catch (e) {
       console.error("generateAiContent error:", e);
