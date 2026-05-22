@@ -74,6 +74,7 @@ export default function SpotiLive() {
   // AI content
   const [aiContent, setAiContent] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [geminiDebug, setGeminiDebug] = useState(null);
 
   // UI
   const [activeTab, setActiveTab] = useState("now");
@@ -272,6 +273,7 @@ AMBIANCE
     if (data.error) throw new Error(data.error.message);
 
     const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    setGeminiDebug({ raw: raw.slice(0, 800), error: data.error?.message || null, status: res.status });
 
     // Parser le texte structuré par délimiteurs — plus robuste que JSON
     const sections = raw.split(/^---$/m).map(s => s.trim());
@@ -604,6 +606,14 @@ AMBIANCE
                 <div style={styles.aiPlaceholder}>
                   <p>Les informations sur la chanson apparaîtront ici</p>
                 </div>
+              {geminiDebug && (
+                <div style={{...styles.aiBlock, borderColor: "rgba(255,100,100,.3)", marginTop: 8}}>
+                  <p style={{...styles.aiTitle, color: "#ff6b6b"}}>DEBUG GEMINI</p>
+                  <p style={{fontSize: 10, opacity: 0.7, wordBreak: "break-all", whiteSpace: "pre-wrap"}}>
+                    {geminiDebug.error ? "ERREUR: " + geminiDebug.error : geminiDebug.raw || "Réponse vide"}
+                  </p>
+                </div>
+              )}
               ) : null}
             </div>
           </div>
