@@ -24,7 +24,7 @@ async function generateCodeChallenge(verifier) {
 }
 
 // Clé Last.fm intégrée - identifie SpotiLive comme application
-const LASTFM_KEY = localStorage.getItem("spotilive_lastfm_key") || "43a8dd6083e2571bf6e47c5d88a88a7f";
+const LASTFM_KEY = localStorage.getItem("spotilive_lastfm_key") || "a12753d3756a170f843bd0666053588f";
 async function lastfmFetch(params) {
   const url = new URL("https://ws.audioscrobbler.com/2.0/");
   Object.entries({ ...params, format: "json" }).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -315,8 +315,8 @@ export default function SpotiLive() {
       setTrackStats({ lastfm: lfmTrack });
       setArtistStats({ lastfm: lfmArtist });
       setQuickInfo({
-        genre: genre + (spotifyArtistRes ? " [S✓]" : " [S✗]") + (lfmArtist ? "[L✓]" : "[L✗]"),
-        ambiance: ambiance || ("tags:" + (lfmArtist?.tags?.tag?.length || 0)),
+        genre,
+        ambiance,
         playcount: lfmTrack?.playcount || null,
       });
 
@@ -447,9 +447,10 @@ ANECDOTES
       }
 
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
+      // Fetch recommendations with the same token (still valid here)
+      fetchRecommendations(track);
     } catch (e) {
       console.error("generateAiContent error:", e);
-      setQuickInfo({ genre: "ERR: " + e.message?.slice(0,30), ambiance: e.name || "?", playcount: -1 });
       setAiContent({ bio: "Erreur: " + e.message, explication: "", anecdotes: [], genre: "—", ambiance: "—" });
     }
     setAiLoading(false);
@@ -466,7 +467,6 @@ ANECDOTES
     if (track.id !== lastTrackRef.current) {
       lastTrackRef.current = track.id;
       generateAiContent(track);
-      fetchRecommendations(track);
     }
   }, [spotifyFetch]);
 
@@ -601,11 +601,7 @@ ANECDOTES
                     ))}
                   </div>
 
-                  <div style={{ background: "rgba(255,80,80,.12)", border: "1px solid rgba(255,80,80,.3)", borderRadius: 8, padding: "8px 12px", fontSize: 11, lineHeight: 1.8, color: "#f0ede8" }}>
-                    <div>Genre: <b>{quickInfo.genre}</b> | Ambiance: <b>{quickInfo.ambiance}</b></div>
-                    <div>Écoutes: <b>{quickInfo.playcount || "null"}</b></div>
-                    <div>Recs: <b>{recommendations.tracks.length}</b> titres, <b>{recommendations.artists.length}</b> artistes</div>
-                  </div>
+
                 </>
               ) : (
                 <div style={styles.nothing}>
