@@ -255,12 +255,10 @@ Informations disponibles :
 BIO
 Biographie complète et passionnante de ${artistName} en 5-6 phrases. Inclure : origines, style musical, influences, carrière, albums importants, anecdotes marquantes. Utilise les sources Wikipedia et Last.fm. Si peu d'info, développe à partir du genre et de l'époque.
 
----
 
 CHANSON
 Histoire et contexte de "${trackName}" en 4-5 phrases. Inclure : contexte de création, thèmes abordés, ambiance sonore, réception, place dans la discographie. Si peu d'info sur cette chanson précise, parle du style de l'album et de l'artiste à cette période.
 
----
 
 ANECDOTES
 3 anecdotes fascinantes sur l'artiste ou la chanson, une par ligne, commençant par un tiret. Utilise les données factuelles disponibles (dates, chiffres, pays) et enrichis avec des faits culturels ou historiques pertinents.`;
@@ -288,9 +286,7 @@ ANECDOTES
         const raw = groqData.choices?.[0]?.message?.content || "";
 
         if (raw) {
-          const parts = raw.split(/
----
-/);
+          const parts = raw.split("\n---\n");
           const extract = (label) => {
             const idx = parts.findIndex(p => p.trim().toUpperCase().startsWith(label));
             if (idx === -1) return "";
@@ -300,10 +296,9 @@ ANECDOTES
           explication = extract("CHANSON");
           const anecdotesRaw = extract("ANECDOTES");
           anecdotes = anecdotesRaw
-            .split("
-")
+            .split("\n")
             .filter(l => l.trim().startsWith("-"))
-            .map(l => l.replace(/^-\s*/, "").trim())
+            .map(l => { const t = l.trim(); return t.startsWith("- ") ? t.slice(2) : t.slice(1).trim(); })
             .filter(Boolean);
         }
       } catch (e) {
