@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 const SPOTIFY_CLIENT_ID = "80383eb1983d4282b296c26b91b75b6d";
+const GROQ_API_KEY = "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";
+const GROQ_MODEL = "llama-3.1-8b-instant";
 const SPOTIFY_SCOPES = [
   "user-read-currently-playing",
   "user-read-playback-state",
@@ -193,16 +195,14 @@ export default function SpotiLive() {
       const key = lastfmKey || LASTFM_KEY;
 
       // Toutes les sources en parallèle
-      const [lfmArtistRes, lfmTrackRes, mbRes, wikiArtist, wikiTrack] = await Promise.all([
+      const [lfmArtistRes, lfmTrackRes, mbRes, wikiArtistRaw, wikiTrackRaw] = await Promise.all([
         lastfmFetch({ method: "artist.getInfo", api_key: key, artist: artistName, lang: "fr" }).catch(() => ({})),
         lastfmFetch({ method: "track.getInfo", api_key: key, artist: artistName, track: trackName }).catch(() => ({})),
         fetch(
           `https://musicbrainz.org/ws/2/recording/?query=recording:"${encodeURIComponent(trackName)}" AND artist:"${encodeURIComponent(artistName)}"&limit=1&fmt=json`,
           { headers: { "User-Agent": "SpotiLive/1.0 (https://spotilive.netlify.app)" } }
         ).then(r => r.json()).catch(() => ({})),
-        // Wikipedia FR pour l'artiste
         wikipediaFetch(artistName, "fr").catch(() => null),
-        // Wikipedia FR pour la chanson (ex: "Yesterday Beatles")
         wikipediaFetch(`${trackName} ${artistName}`, "fr").catch(() => null),
       ]);
 
@@ -210,66 +210,125 @@ export default function SpotiLive() {
       const lfmTrack = lfmTrackRes?.track;
       const mbRecording = mbRes?.recordings?.[0];
 
-      // ── BIO ──────────────────────────────────────────────────────────────
-      // Priorité : Wikipedia FR > Last.fm bio FR > fallback
-      let bio = "";
-      if (wikiArtist && wikiArtist.length > 100) {
-        bio = cleanAndTruncate(wikiArtist, 700);
-      } else {
-        const lfmBio = (lfmArtist?.bio?.content || lfmArtist?.bio?.summary || "")
-          .replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "")
-          .replace(/<[^>]+>/g, "")
-          .replace(/\s+/g, " ").trim();
-        bio = cleanAndTruncate(lfmBio, 700);
-      }
-      if (!bio) bio = `${artistName} est un artiste musical. Aucune biographie détaillée n'est disponible dans les sources consultées.`;
-
-      // ── EXPLICATION DE LA CHANSON ─────────────────────────────────────────
-      // Priorité : Wikipedia FR chanson > Last.fm wiki > fiche factuelle
-      let explication = "";
-      if (wikiTrack && wikiTrack.length > 80) {
-        // Vérifier que Wikipedia parle bien de la bonne chanson (pas juste de l'artiste)
-        const relevant = wikiTrack.toLowerCase().includes(trackName.toLowerCase().slice(0, 6)) ||
-                         wikiTrack.toLowerCase().includes(artistName.toLowerCase().slice(0, 6));
-        if (relevant) explication = cleanAndTruncate(wikiTrack, 600);
-      }
-      if (!explication) {
-        const lfmWiki = (lfmTrack?.wiki?.content || lfmTrack?.wiki?.summary || "")
-          .replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "")
-          .replace(/<[^>]+>/g, "")
-          .replace(/\s+/g, " ").trim();
-        if (lfmWiki.length > 50) explication = cleanAndTruncate(lfmWiki, 600);
-      }
-      if (!explication) {
-        const dur = track.duration_ms
-          ? `${Math.floor(track.duration_ms / 60000)}m${String(Math.floor((track.duration_ms % 60000) / 1000)).padStart(2, "0")}s`
-          : null;
-        const parts = [`"${trackName}" est un titre de ${artistName}, extrait de l'album "${albumName}"${yr ? ` sorti en ${yr}` : ""}.`];
-        if (dur) parts.push(`La chanson dure ${dur}.`);
-        if (lfmTrack?.playcount) parts.push(`Elle totalise ${Number(lfmTrack.playcount).toLocaleString("fr-BE")} écoutes sur Last.fm.`);
-        explication = parts.join(" ");
-      }
-
-      // ── GENRE & AMBIANCE ──────────────────────────────────────────────────
-      const tags = lfmArtist?.tags?.tag?.map(t => t.name) ||
-                   lfmTrack?.toptags?.tag?.map(t => t.name) || [];
+      // Tags Last.fm
+      const tags = lfmArtist?.tags?.tag?.map(t => t.name) || lfmTrack?.toptags?.tag?.map(t => t.name) || [];
       const genre = tags[0] || "—";
       const ambiance = tags.slice(1, 3).join(", ") || "—";
 
-      // ── ANECDOTES ─────────────────────────────────────────────────────────
-      const anecdotes = [];
-      if (mbRecording?.length) {
-        const m = Math.floor(mbRecording.length / 60000);
-        const s = String(Math.floor((mbRecording.length % 60000) / 1000)).padStart(2, "0");
-        anecdotes.push(`Durée officielle selon MusicBrainz : ${m}m${s}s.`);
-      }
-      if (mbRecording?.releases?.[0]?.date) anecdotes.push(`Date de sortie officielle : ${mbRecording.releases[0].date}.`);
-      if (mbRecording?.releases?.[0]?.country) anecdotes.push(`Pays de sortie : ${mbRecording.releases[0].country}.`);
-      if (lfmTrack?.playcount) anecdotes.push(`Ce titre totalise ${Number(lfmTrack.playcount).toLocaleString("fr-BE")} écoutes sur Last.fm.`);
-      if (lfmArtist?.stats?.listeners) anecdotes.push(`${Number(lfmArtist.stats.listeners).toLocaleString("fr-BE")} auditeurs uniques sur Last.fm.`);
-      if (mbRecording?.releases?.length > 1) anecdotes.push(`Ce titre est apparu sur ${mbRecording.releases.length} sorties différentes selon MusicBrainz.`);
+      // Préparer les sources brutes pour Groq
+      const wikiArtistClean = wikiArtistRaw ? cleanAndTruncate(wikiArtistRaw, 800) : "";
+      const wikiTrackClean = wikiTrackRaw ? cleanAndTruncate(wikiTrackRaw, 500) : "";
+      const lfmBioClean = cleanAndTruncate(
+        (lfmArtist?.bio?.content || lfmArtist?.bio?.summary || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(), 400
+      );
+      const lfmWikiClean = cleanAndTruncate(
+        (lfmTrack?.wiki?.content || lfmTrack?.wiki?.summary || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(), 300
+      );
 
-      // Mettre à jour trackStats et artistStats avec les données déjà récupérées
+      const mbDate = mbRecording?.releases?.[0]?.date || "";
+      const mbCountry = mbRecording?.releases?.[0]?.country || "";
+      const mbDur = mbRecording?.length
+        ? `${Math.floor(mbRecording.length/60000)}m${String(Math.floor((mbRecording.length%60000)/1000)).padStart(2,"0")}s`
+        : "";
+      const mbReleases = mbRecording?.releases?.length || 0;
+      const lfmPlays = lfmTrack?.playcount ? Number(lfmTrack.playcount).toLocaleString("fr-BE") : "";
+      const lfmListeners = lfmArtist?.stats?.listeners ? Number(lfmArtist.stats.listeners).toLocaleString("fr-BE") : "";
+
+      // Prompt Groq
+      const prompt = `Tu es un expert musical passionné. Réponds UNIQUEMENT en français, avec des phrases riches et complètes.
+
+Informations disponibles :
+- Artiste : ${artistName}
+- Chanson : "${trackName}"
+- Album : ${albumName} (${yr})
+- Tags musicaux : ${tags.join(", ") || "non disponibles"}
+- Wikipedia artiste : ${wikiArtistClean || "non disponible"}
+- Wikipedia chanson : ${wikiTrackClean || "non disponible"}
+- Bio Last.fm : ${lfmBioClean || "non disponible"}
+- Info chanson Last.fm : ${lfmWikiClean || "non disponible"}
+- MusicBrainz : durée ${mbDur || "?"}, sortie ${mbDate || "?"}, pays ${mbCountry || "?"}
+- Écoutes Last.fm : ${lfmPlays || "non disponible"}
+- Auditeurs Last.fm : ${lfmListeners || "non disponible"}
+
+Écris exactement 3 sections séparées par ---
+
+BIO
+Biographie complète et passionnante de ${artistName} en 5-6 phrases. Inclure : origines, style musical, influences, carrière, albums importants, anecdotes marquantes. Utilise les sources Wikipedia et Last.fm. Si peu d'info, développe à partir du genre et de l'époque.
+
+---
+
+CHANSON
+Histoire et contexte de "${trackName}" en 4-5 phrases. Inclure : contexte de création, thèmes abordés, ambiance sonore, réception, place dans la discographie. Si peu d'info sur cette chanson précise, parle du style de l'album et de l'artiste à cette période.
+
+---
+
+ANECDOTES
+3 anecdotes fascinantes sur l'artiste ou la chanson, une par ligne, commençant par un tiret. Utilise les données factuelles disponibles (dates, chiffres, pays) et enrichis avec des faits culturels ou historiques pertinents.`;
+
+      // Appel Groq
+      let bio = "";
+      let explication = "";
+      let anecdotes = [];
+
+      try {
+        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GROQ_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: GROQ_MODEL,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.6,
+            max_tokens: 1200,
+          }),
+        });
+        const groqData = await groqRes.json();
+        const raw = groqData.choices?.[0]?.message?.content || "";
+
+        if (raw) {
+          const parts = raw.split(/
+---
+/);
+          const extract = (label) => {
+            const idx = parts.findIndex(p => p.trim().toUpperCase().startsWith(label));
+            if (idx === -1) return "";
+            const sec = parts[idx].trim(); const nl = sec.indexOf("\n"); return nl === -1 ? "" : sec.slice(nl).trim();
+          };
+          bio = extract("BIO");
+          explication = extract("CHANSON");
+          const anecdotesRaw = extract("ANECDOTES");
+          anecdotes = anecdotesRaw
+            .split("
+")
+            .filter(l => l.trim().startsWith("-"))
+            .map(l => l.replace(/^-\s*/, "").trim())
+            .filter(Boolean);
+        }
+      } catch (e) {
+        console.warn("Groq error:", e);
+      }
+
+      // Fallbacks si Groq échoue
+      if (!bio) {
+        bio = wikiArtistClean || lfmBioClean || `${artistName} est un artiste musical. Aucune biographie détaillée n'est disponible.`;
+      }
+      if (!explication) {
+        const dur = track.duration_ms
+          ? `${Math.floor(track.duration_ms/60000)}m${String(Math.floor((track.duration_ms%60000)/1000)).padStart(2,"0")}s`
+          : null;
+        explication = `"${trackName}" est un titre de ${artistName}, extrait de l'album "${albumName}"${yr ? ` (${yr})` : ""}${dur ? `. Durée : ${dur}` : ""}.`;
+      }
+      if (anecdotes.length === 0) {
+        if (mbDur) anecdotes.push(`Durée officielle selon MusicBrainz : ${mbDur}.`);
+        if (mbDate) anecdotes.push(`Date de sortie officielle : ${mbDate}.`);
+        if (mbCountry) anecdotes.push(`Pays de sortie : ${mbCountry}.`);
+        if (lfmPlays) anecdotes.push(`Ce titre totalise ${lfmPlays} écoutes sur Last.fm.`);
+        if (lfmListeners) anecdotes.push(`${lfmListeners} auditeurs uniques sur Last.fm.`);
+        if (mbReleases > 1) anecdotes.push(`Ce titre est apparu sur ${mbReleases} sorties différentes selon MusicBrainz.`);
+      }
+
       setTrackStats({ lastfm: lfmTrack });
       setArtistStats({ lastfm: lfmArtist });
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
