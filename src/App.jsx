@@ -211,10 +211,6 @@ export default function SpotiLive() {
     return res.json();
   }, [token, refreshAccessToken]);
 
-
-
-
-
   const fetchLastfmStats = useCallback(async () => {
     if (!lastfmUser) return;
     const key = LASTFM_KEY;
@@ -304,7 +300,6 @@ export default function SpotiLive() {
       console.warn("Recommendations error:", e);
     }
   };
-
 
   const generateAiContent = async (track) => {
     setAiContent(null);
@@ -492,7 +487,6 @@ ANECDOTES
     setAiLoading(false);
   };
 
-
   const fetchCurrent = useCallback(async () => {
     const data = await spotifyFetch("me/player/currently-playing");
     if (!data || !data.item) { setCurrent(null); setIsPlaying(false); return; }
@@ -538,7 +532,7 @@ ANECDOTES
     sessionStorage.removeItem("spotify_token");
     localStorage.removeItem("spotify_refresh_token");
     localStorage.removeItem("spotify_expires_at");
-    setCurrent(null); setAiContent(null); setTrackStats(null); setRecommendations({ tracks: [], artists: [] });
+    setCurrent(null); setAiContent(null); setTrackStats(null); setArtistStats(null); setRecommendations({ tracks: [], artists: [], error: null });
     setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
   };
 
@@ -707,9 +701,10 @@ ANECDOTES
                         {recommendations.tracks.map(t => (
                           <a
                             key={t.id}
-                            href={t.uri}
+                            href={`https://open.spotify.com/track/${t.id}`}
+                            target="_blank"
+                            rel="noreferrer"
                             style={styles.recItem}
-                            onClick={e => { e.preventDefault(); window.location.href = t.uri; }}
                           >
                             {t.album?.images?.[2]?.url && (
                               <img src={t.album.images[2].url} alt="" style={styles.recThumb} />
@@ -732,9 +727,10 @@ ANECDOTES
                         {recommendations.artists.filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i).map(a => (
                           <a
                             key={a.id}
-                            href={a.uri || `https://open.spotify.com/search/${encodeURIComponent(a.name)}`}
+                            href={a.uri ? `https://open.spotify.com/artist/${a.id}` : `https://open.spotify.com/search/${encodeURIComponent(a.name)}`}
+                            target="_blank"
+                            rel="noreferrer"
                             style={styles.recItem}
-                            onClick={e => { e.preventDefault(); window.location.href = a.uri || `https://open.spotify.com/search/${encodeURIComponent(a.name)}`; }}
                           >
                             {a.image
                               ? <img src={a.image} alt="" style={{ ...styles.recThumb, borderRadius: "50%" }} />
