@@ -497,7 +497,7 @@ ANECDOTES
     fetchCurrent();
     fetchSpotifyStats();
     fetchLastfmStats();
-    pollRef.current = setInterval(() => { fetchCurrent(); fetchLastfmStats(); }, 15000);
+    pollRef.current = setInterval(() => { fetchCurrent(); fetchLastfmStats(); }, 5000);
     return () => clearInterval(pollRef.current);
   }, [token, fetchCurrent, fetchSpotifyStats, fetchLastfmStats]);
 
