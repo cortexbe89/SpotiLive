@@ -23,7 +23,8 @@ async function generateCodeChallenge(verifier) {
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
-const LASTFM_KEY = "43a8dd6083e2571bf6e47c5d88a88a7f";
+// Clé Last.fm intégrée - identifie SpotiLive comme application
+const LASTFM_KEY = localStorage.getItem("spotilive_lastfm_key") || "43a8dd6083e2571bf6e47c5d88a88a7f";
 async function lastfmFetch(params) {
   const url = new URL("https://ws.audioscrobbler.com/2.0/");
   Object.entries({ ...params, format: "json" }).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -448,10 +449,12 @@ ANECDOTES
   }, [isPlaying, current]);
 
   const saveConfig = () => {
-    if (lastfmUserInput.trim()) {
-      localStorage.setItem("spotilive_lastfm_user", lastfmUserInput.trim());
-      setLastfmUser(lastfmUserInput.trim());
+    const newUser = lastfmUserInput.trim() || lastfmUser;
+    if (newUser) {
+      localStorage.setItem("spotilive_lastfm_user", newUser);
+      setLastfmUser(newUser);
     }
+    setLastfmUserInput("");
     setShowConfig(false);
   };
 
@@ -513,7 +516,7 @@ ANECDOTES
         <div style={styles.headerLogo}>SpotiLive</div>
         <div style={styles.headerRight}>
           {lastfmProfile && <span style={styles.lfmBadge}>📻 {lastfmProfile.name} · {fmtNum(lastfmProfile.playcount)} écoutes</span>}
-          <button style={styles.btnIcon} onClick={() => setShowConfig(true)}>⚙</button>
+          <button style={styles.btnIcon} onClick={() => { setLastfmUserInput(lastfmUser); setShowConfig(true); }}>⚙</button>
           <button style={styles.btnIcon} onClick={logout}>✕</button>
         </div>
       </header>
@@ -710,7 +713,7 @@ ANECDOTES
             <h2 style={styles.modalTitle}>Configuration</h2>
             <div style={styles.configSection}>
               <label style={styles.configLabel}>Username Last.fm</label>
-              <input style={styles.configInput} placeholder={lastfmUser || "Votre pseudo Last.fm"} value={lastfmUserInput} onChange={e => setLastfmUserInput(e.target.value)} />
+              <input style={styles.configInput} placeholder="Votre pseudo Last.fm" value={lastfmUserInput} onChange={e => setLastfmUserInput(e.target.value)} />
               <p style={{ fontSize: 11, opacity: 0.4, color: "#f0ede8", marginTop: 6, lineHeight: 1.6 }}>
                 Entrez votre pseudo Last.fm pour voir vos stats d'écoute.
               </p>
