@@ -501,6 +501,12 @@ ANECDOTES
     return () => clearInterval(pollRef.current);
   }, [token, fetchCurrent, fetchSpotifyStats, fetchLastfmStats]);
 
+  // Scroll active tab into view on every tab change (swipe or click)
+  useEffect(() => {
+    const el = document.getElementById(`tab-${activeTab}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [activeTab]);
+
   useEffect(() => {
     if (!isPlaying || !current) return;
     progressRef.current = setInterval(() => {
