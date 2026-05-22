@@ -88,6 +88,7 @@ export default function SpotiLive() {
   const [lastfmProfile, setLastfmProfile] = useState(null);
 
   const [aiContent, setAiContent] = useState(null);
+  const [quickInfo, setQuickInfo] = useState({ genre: "—", ambiance: "—", playcount: null });
   const [aiLoading, setAiLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState("now");
@@ -175,6 +176,7 @@ export default function SpotiLive() {
   const generateAiContent = async (track) => {
     setAiContent(null);
     setAiLoading(true);
+    setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
     try {
       const artistName = track.artists[0].name;
       const trackName = track.name;
@@ -208,10 +210,14 @@ export default function SpotiLive() {
       const genre = allGenres[0] || "—";
       const ambiance = allGenres.slice(1, 3).join(", ") || "—";
 
-      // Afficher immédiatement les stats rapides AVANT Groq (pas besoin d'attendre l'IA)
+      // Afficher immédiatement les stats rapides AVANT Groq
       setTrackStats({ lastfm: lfmTrack });
       setArtistStats({ lastfm: lfmArtist });
-      setAiContent(prev => ({ bio: "", explication: "", anecdotes: [], ...(prev || {}), genre, ambiance }));
+      setQuickInfo({
+        genre: genre,
+        ambiance: ambiance,
+        playcount: lfmTrack?.playcount || null,
+      });
 
       // 4. Sources brutes pour Groq
       const wikiArtistClean = wikiArtistRaw ? cleanAndTruncate(wikiArtistRaw, 800) : "";
@@ -386,7 +392,7 @@ ANECDOTES
 
   const logout = () => {
     setToken(null); sessionStorage.removeItem("spotify_token");
-    setCurrent(null); setAiContent(null); setTrackStats(null);
+    setCurrent(null); setAiContent(null); setTrackStats(null); setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
   };
 
   const pct = current ? (progress / current.duration_ms) * 100 : 0;
@@ -469,9 +475,9 @@ ANECDOTES
                   </div>
                   <div style={styles.quickStats}>
                     {[
-                      ["Écoutes", trackStats?.lastfm?.playcount ? fmtNum(trackStats.lastfm.playcount) : "—"],
-                      ["Genre", aiContent?.genre || "—"],
-                      ["Ambiance", aiContent?.ambiance || "—"],
+                      ["Écoutes", quickInfo.playcount ? fmtNum(quickInfo.playcount) : (trackStats?.lastfm?.playcount ? fmtNum(trackStats.lastfm.playcount) : "—")],
+                      ["Genre", quickInfo.genre || "—"],
+                      ["Ambiance", quickInfo.ambiance || "—"],
                     ].map(([k, v]) => (
                       <div key={k} style={styles.quickStat}>
                         <span style={styles.qsLabel}>{k}</span>
