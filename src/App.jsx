@@ -647,7 +647,7 @@ ANECDOTES
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600&family=DM+Mono:wght@300;400&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes ring { 0%{transform:scale(1);opacity:.8} 100%{transform:scale(1.15);opacity:0} }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body, #root { width: 100%; min-height: 100dvh; }
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 2px; }
       `}</style>
     </div>
@@ -655,10 +655,10 @@ ANECDOTES
 }
 
 const styles = {
-  app: { minHeight: "100vh", background: "#0a0a0f", color: "#f0ede8", fontFamily: "'DM Mono', monospace", position: "relative", overflow: "hidden" },
-  ambientBg: { position: "fixed", inset: 0, backgroundSize: "cover", backgroundPosition: "center", filter: "blur(80px) saturate(1.8)", opacity: 0.12, transform: "scale(1.1)", transition: "background-image 2s ease", zIndex: 0 },
+  app: { minHeight: "100dvh", width: "100%", maxWidth: "100vw", background: "#0a0a0f", color: "#f0ede8", fontFamily: "'DM Mono', monospace", position: "relative", overflowX: "hidden" },
+  ambientBg: { position: "fixed", inset: 0, width: "100%", height: "100%", backgroundSize: "cover", backgroundPosition: "center", filter: "blur(80px) saturate(1.8)", opacity: 0.12, transform: "scale(1.1)", transition: "background-image 2s ease", zIndex: 0 },
   overlay: { position: "fixed", inset: 0, background: "linear-gradient(180deg, rgba(10,10,15,.95) 0%, rgba(10,10,15,.85) 100%)", zIndex: 1 },
-  header: { position: "relative", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.06)", backdropFilter: "blur(20px)" },
+  header: { position: "relative", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.06)", backdropFilter: "blur(20px)", width: "100%" },
   headerLogo: { fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, background: "linear-gradient(135deg, #1db954, #1ed760)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
   headerRight: { display: "flex", alignItems: "center", gap: 12 },
   lfmBadge: { fontSize: 11, opacity: 0.6, background: "rgba(255,255,255,.06)", padding: "5px 10px", borderRadius: 20 },
@@ -666,8 +666,8 @@ const styles = {
   tabs: { position: "relative", zIndex: 10, display: "flex", gap: 4, padding: "12px 16px 0" },
   tab: { background: "none", border: "none", color: "rgba(240,237,232,.4)", cursor: "pointer", fontSize: 13, padding: "8px 16px", borderRadius: "8px 8px 0 0", fontFamily: "'DM Mono', monospace", transition: "all .2s" },
   tabActive: { background: "rgba(255,255,255,.06)", color: "#f0ede8", borderBottom: "2px solid #1db954" },
-  main: { position: "relative", zIndex: 10, padding: "16px", maxWidth: 1200, margin: "0 auto" },
-  nowGrid: { display: "flex", flexDirection: "column", gap: 20, maxWidth: 600, margin: "0 auto", width: "100%" },
+  main: { position: "relative", zIndex: 10, padding: "16px", maxWidth: 1200, margin: "0 auto", width: "100%" },
+  nowGrid: { display: "flex", flexDirection: "column", gap: 20, maxWidth: "min(600px, 100%)", margin: "0 auto", width: "100%" },
   playerCol: { display: "flex", flexDirection: "column", gap: 16, alignItems: "center" },
   albumWrap: { position: "relative", alignSelf: "center", width: 220, height: 220 },
   albumArt: { width: "100%", height: "100%", borderRadius: 16, boxShadow: "0 20px 60px rgba(0,0,0,.6)", position: "relative", zIndex: 2 },
@@ -735,8 +735,8 @@ const styles = {
   historyTitle: { display: "block", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   historySub: { display: "block", fontSize: 11, opacity: 0.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   historyTime: { fontSize: 11, opacity: 0.35, flexShrink: 0 },
-  configScreen: { minHeight: "100vh", background: "#0a0a0f", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Mono', monospace" },
-  configCard: { background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 20, padding: "40px", maxWidth: 480, width: "90%", display: "flex", flexDirection: "column", gap: 24 },
+  configScreen: { minHeight: "100dvh", width: "100vw", background: "#0a0a0f", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Mono', monospace", padding: "16px" },
+  configCard: { background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 20, padding: "clamp(24px, 5vw, 40px)", maxWidth: 480, width: "100%", display: "flex", flexDirection: "column", gap: 20 },
   logo: { fontFamily: "'Fraunces', serif", fontSize: 32, fontWeight: 600, background: "linear-gradient(135deg, #1db954, #1ed760)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", textAlign: "center" },
   configSubtitle: { textAlign: "center", opacity: 0.5, fontSize: 13, color: "#f0ede8" },
   configSection: { display: "flex", flexDirection: "column", gap: 6 },
