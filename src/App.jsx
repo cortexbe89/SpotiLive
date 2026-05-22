@@ -244,52 +244,60 @@ export default function SpotiLive() {
     try {
       const artistId = track.artists[0].id;
       const artistName = track.artists[0].name;
+      const trackName = track.name;
       const headers = { Authorization: `Bearer ${currentToken}` };
-      const lfmKey = LASTFM_KEY;
 
-      // Top tracks Spotify (encore disponible) + artistes similaires Last.fm
-      const [topTracksRes, similarRes] = await Promise.all([
-        fetch(`https://api.spotify.com/v1/artists/${artistId}/top-tracks?market=BE`, { headers })
-          .then(r => r.ok ? r.json() : null).catch(() => null),
-        lastfmFetch({ method: "artist.getSimilar", api_key: lfmKey, artist: artistName, limit: 6 })
-          .catch(() => null),
+      // Titres similaires Last.fm + Artistes similaires Last.fm en parallèle
+      const [similarTracksRes, similarArtistsRes] = await Promise.all([
+        lastfmFetch({ method: "track.getSimilar", api_key: LASTFM_KEY, artist: artistName, track: trackName, limit: 8 }).catch(() => null),
+        lastfmFetch({ method: "artist.getSimilar", api_key: LASTFM_KEY, artist: artistName, limit: 6 }).catch(() => null),
       ]);
 
-      // Top tracks hors track en cours
-      const topTracks = (topTracksRes?.tracks || [])
-        .filter(t => t.id !== track.id)
-        .slice(0, 6);
+      // Titres similaires → recherche Spotify pour pochette + URI
+      const similarTracks = similarTracksRes?.similartracks?.track || [];
+      const recTracks = await Promise.all(
+        similarTracks.slice(0, 6).map(async t => {
+          try {
+            const res = await fetch(
+              `https://api.spotify.com/v1/search?q=track:${encodeURIComponent(t.name)}+artist:${encodeURIComponent(t.artist?.name || artistName)}&type=track&limit=1&market=BE`,
+              { headers }
+            ).then(r => r.ok ? r.json() : null);
+            const item = res?.tracks?.items?.[0];
+            if (item) return {
+              id: item.id,
+              name: item.name,
+              uri: item.uri,
+              album: item.album,
+              artists: item.artists,
+            };
+          } catch {}
+          return null;
+        })
+      );
 
-      // Artistes similaires via Last.fm
-      const similarArtistsRaw = similarRes?.similarartists?.artist || [];
-      const similarNames = similarArtistsRaw.slice(0, 6).map(a => a.name);
-
-      // Chercher les IDs Spotify pour les artistes similaires (pour les liens et images)
-      const similarWithSpotify = await Promise.all(
-        similarNames.map(async name => {
+      // Artistes similaires → recherche Spotify pour photo + URI
+      const similarArtistNames = (similarArtistsRes?.similarartists?.artist || []).slice(0, 6).map(a => a.name);
+      const recArtists = await Promise.all(
+        similarArtistNames.map(async name => {
           try {
             const res = await fetch(
               `https://api.spotify.com/v1/search?q=${encodeURIComponent(name)}&type=artist&limit=1&market=BE`,
               { headers }
             ).then(r => r.ok ? r.json() : null);
             const artist = res?.artists?.items?.[0];
-            if (artist) {
-              return {
-                id: artist.id,
-                name: artist.name,
-                uri: artist.uri,
-                image: artist.images?.[2]?.url || artist.images?.[0]?.url || null,
-                genres: artist.genres?.slice(0, 1) || [],
-              };
-            }
+            if (artist) return {
+              id: artist.id, name: artist.name, uri: artist.uri,
+              image: artist.images?.[2]?.url || artist.images?.[0]?.url || null,
+              genres: artist.genres?.slice(0, 1) || [],
+            };
           } catch {}
           return { id: name, name, uri: null, image: null, genres: [] };
         })
       );
 
       setRecommendations({
-        tracks: topTracks,
-        artists: similarWithSpotify.filter(Boolean),
+        tracks: recTracks.filter(Boolean),
+        artists: recArtists.filter(Boolean),
         error: null,
       });
     } catch (e) {
@@ -694,7 +702,7 @@ ANECDOTES
 
                   {recommendations.tracks.length > 0 && (
                     <div style={styles.aiBlock}>
-                      <h3 style={styles.aiTitle}>Top titres · {current?.artists?.[0]?.name}</h3>
+                      <h3 style={styles.aiTitle}>Titres similaires</h3>
                       <div style={styles.recList}>
                         {recommendations.tracks.map(t => (
                           <a
@@ -721,7 +729,7 @@ ANECDOTES
                     <div style={styles.aiBlock}>
                       <h3 style={styles.aiTitle}>Artistes similaires</h3>
                       <div style={styles.recList}>
-                        {recommendations.artists.map(a => (
+                        {recommendations.artists.filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i).map(a => (
                           <a
                             key={a.id}
                             href={a.uri || `https://open.spotify.com/search/${encodeURIComponent(a.name)}`}
