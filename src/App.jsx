@@ -248,12 +248,14 @@ export default function SpotiLive() {
       const yr = track.album.release_date?.slice(0, 4) || "";
       const key = LASTFM_KEY;
 
-      // 1. Genres Spotify sur l'artiste (sans Last.fm)
-      const spotifyArtist = await spotifyFetch(`artists/${track.artists[0].id}`).catch(() => null);
-      const spotifyGenres = spotifyArtist?.genres || [];
-
-      // 2. Toutes les autres sources en parallèle
-      const [lfmArtistRes, lfmTrackRes, mbRes, wikiArtistRaw, wikiTrackRaw] = await Promise.all([
+      // Toutes les sources en parallèle (y compris genres Spotify)
+      const currentToken = sessionStorage.getItem("spotify_token");
+      const [spotifyArtistRes, lfmArtistRes, lfmTrackRes, mbRes, wikiArtistRaw, wikiTrackRaw] = await Promise.all([
+        currentToken
+          ? fetch(`https://api.spotify.com/v1/artists/${track.artists[0].id}`, {
+              headers: { Authorization: `Bearer ${currentToken}` }
+            }).then(r => r.ok ? r.json() : null).catch(() => null)
+          : Promise.resolve(null),
         lastfmFetch({ method: "artist.getInfo", api_key: key, artist: artistName, lang: "fr" }).catch(() => ({})),
         lastfmFetch({ method: "track.getInfo", api_key: key, artist: artistName, track: trackName }).catch(() => ({})),
         fetch(
@@ -263,6 +265,7 @@ export default function SpotiLive() {
         wikipediaFetch(artistName, "fr").catch(() => null),
         wikipediaFetch(`${trackName} ${artistName}`, "fr").catch(() => null),
       ]);
+      const spotifyGenres = spotifyArtistRes?.genres || [];
 
       const lfmArtist = lfmArtistRes?.artist;
       const lfmTrack = lfmTrackRes?.track;
