@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 // ─── SPOTIFY CONFIG ────────────────────────────────────────────────────────────
 const SPOTIFY_CLIENT_ID = "80383eb1983d4282b296c26b91b75b6d";
+const GEMINI_API_KEY = "AIzaSyDA4lmH8_AgFLeN6yQfByGPfnA7VtZAcaU";
 const SPOTIFY_CLIENT_ID_KEY = "spotilive_client_id";
 const SPOTIFY_SCOPES = [
   "user-read-currently-playing",
@@ -214,24 +215,47 @@ export default function SpotiLive() {
     if (topArt?.items) setTopArtists(topArt.items);
   }, [spotifyFetch]);
 
-  // ── Traduction MyMemory (gratuit, sans clé) ──────────────────────────────
-  const translateToFr = async (text) => {
-    if (!text || text.length < 10) return text;
-    const frenchPattern = /[àâäéèêëîïôöùûüçœæ]/i;
-    if (frenchPattern.test(text)) return text;
-    try {
-      const res = await fetch(
-        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=en|fr`
-      );
-      const data = await res.json();
-      if (data.responseStatus === 200 && data.responseData?.translatedText) {
-        return data.responseData.translatedText;
+  // ── Gemini : bio + explication en français ───────────────────────────────
+  const geminiEnrich = async (track, lfmArtist, lfmTrack) => {
+    const artistName = track.artists[0].name;
+    const trackName = track.name;
+    const yr = track.album.release_date?.slice(0, 4) || "";
+    const tags = lfmArtist?.artist?.tags?.tag?.map(t => t.name).join(", ") || "";
+    const playcount = lfmTrack?.track?.playcount || "";
+
+    const prompt = `Tu es un expert musical francophone. Réponds UNIQUEMENT en JSON valide, sans balises markdown.
+Artiste: ${artistName}
+Chanson: "${trackName}"
+Album: ${track.album.name} (${yr})
+Tags Last.fm: ${tags}
+Écoutes Last.fm: ${playcount}
+
+JSON attendu (clés exactes):
+{
+  "bio": "Biographie de l'artiste en 3-4 phrases en français. Sois factuel et précis.",
+  "explication": "Contexte et signification de cette chanson spécifique en 3-4 phrases en français. Si tu n'as pas d'info précise sur cette chanson, décris son style et son époque.",
+  "genre": "Genre musical principal en 1-3 mots",
+  "ambiance": "Ambiance en 2-3 mots max"
+}`;
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 800 },
+        }),
       }
-    } catch {}
-    return text;
+    );
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const clean = text.replace(/```json|```/g, "").trim();
+    return JSON.parse(clean);
   };
 
-  // ── Enrichissement via Last.fm + MusicBrainz (gratuit, sans clé) ────────────
+  // ── Enrichissement principal ───────────────────────────────────────────────
   const generateAiContent = async (track) => {
     setAiContent(null);
     setAiLoading(true);
@@ -248,6 +272,7 @@ export default function SpotiLive() {
           : fetch(`https://ws.audioscrobbler.com/2.0/?method=track.getInfo&artist=${encodeURIComponent(artistName)}&track=${encodeURIComponent(trackName)}&api_key=43a8dd6083e2571bf6e47c5d88a88a7f&format=json`).then(r=>r.json()),
       ]);
 
+      // MusicBrainz pour les anecdotes factuelles
       const mbRes = await fetch(
         `https://musicbrainz.org/ws/2/recording/?query=recording:"${encodeURIComponent(trackName)}" AND artist:"${encodeURIComponent(artistName)}"&limit=1&fmt=json`,
         { headers: { "User-Agent": "SpotiLive/1.0 (https://spotilive.netlify.app)" } }
@@ -255,31 +280,44 @@ export default function SpotiLive() {
       const mbData = await mbRes.json();
       const mbRecording = mbData?.recordings?.[0];
 
-      let bio = lfmArtist?.artist?.bio?.summary || "";
-      bio = bio.replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-      bio = bio.split(".").slice(0, 4).join(".").trim();
-      if (bio) bio = await translateToFr(bio);
+      // Gemini génère bio + explication en français
+      let gemini = null;
+      try { gemini = await geminiEnrich(track, lfmArtist, lfmTrack); } catch {}
+
+      // Tags Last.fm
+      const tags = lfmArtist?.artist?.tags?.tag?.map(t => t.name) || [];
+      const genre = gemini?.genre || tags[0] || lfmTrack?.track?.toptags?.tag?.[0]?.name || "—";
+      const ambiance = gemini?.ambiance || tags.slice(1, 3).join(", ") || "—";
+
+      // Bio : Gemini en priorité, sinon Last.fm nettoyé
+      let bio = gemini?.bio || "";
+      if (!bio) {
+        bio = lfmArtist?.artist?.bio?.summary || "";
+        bio = bio.replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        bio = bio.split(".").slice(0, 4).join(".").trim();
+      }
       if (!bio) bio = "Biographie non disponible pour cet artiste.";
 
-      const tags = lfmArtist?.artist?.tags?.tag?.map(t => t.name) || [];
-      const genre = tags[0] || lfmTrack?.track?.toptags?.tag?.[0]?.name || "—";
-      const ambiance = tags.slice(1, 3).join(", ") || "—";
-
-      let explication = lfmTrack?.track?.wiki?.summary || lfmArtist?.artist?.bio?.content || "";
-      explication = explication.replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-      explication = explication.split(".").slice(0, 3).join(".").trim();
-      if (explication) explication = await translateToFr(explication);
+      // Explication : Gemini en priorité, sinon fiche factuelle
+      let explication = gemini?.explication || "";
+      if (!explication) {
+        explication = lfmTrack?.track?.wiki?.summary || "";
+        explication = explication.replace(/<a[^>]*>[\s\S]*?<\/a>/gi, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        explication = explication.split(".").slice(0, 3).join(".").trim();
+      }
       if (!explication) {
         const yr = track.album.release_date?.slice(0, 4);
-        explication = `"${trackName}" est un titre de ${artistName}${yr ? `, sorti en ${yr}` : ""}, extrait de l'album "${track.album.name}".`;
+        const dur = track.duration_ms ? `${Math.floor(track.duration_ms/60000)}m${String(Math.floor((track.duration_ms%60000)/1000)).padStart(2,"0")}s` : null;
+        const parts = [`"${trackName}" est un titre de ${artistName}, extrait de l'album "${track.album.name}"${yr ? ` (${yr})` : ""}.`];
+        if (dur) parts.push(`La chanson dure ${dur}.`);
+        explication = parts.join(" ");
       }
 
+      // Anecdotes factuelles MusicBrainz + Last.fm
       const anecdotes = [];
-      if (mbRecording) {
-        if (mbRecording.length) anecdotes.push(`Durée officielle : ${Math.floor(mbRecording.length/60000)}m${String(Math.floor((mbRecording.length%60000)/1000)).padStart(2,"0")}s.`);
-        if (mbRecording.releases?.[0]?.date) anecdotes.push(`Date de sortie officielle : ${mbRecording.releases[0].date}.`);
-        if (mbRecording.releases?.[0]?.country) anecdotes.push(`Pays de sortie : ${mbRecording.releases[0].country}.`);
-      }
+      if (mbRecording?.length) anecdotes.push(`Durée officielle : ${Math.floor(mbRecording.length/60000)}m${String(Math.floor((mbRecording.length%60000)/1000)).padStart(2,"0")}s.`);
+      if (mbRecording?.releases?.[0]?.date) anecdotes.push(`Date de sortie officielle : ${mbRecording.releases[0].date}.`);
+      if (mbRecording?.releases?.[0]?.country) anecdotes.push(`Pays de sortie : ${mbRecording.releases[0].country}.`);
       if (lfmTrack?.track?.playcount) anecdotes.push(`Ce titre totalise ${Number(lfmTrack.track.playcount).toLocaleString("fr-BE")} écoutes sur Last.fm.`);
       if (lfmArtist?.artist?.stats?.listeners) anecdotes.push(`${Number(lfmArtist.artist.stats.listeners).toLocaleString("fr-BE")} auditeurs uniques sur Last.fm.`);
 
