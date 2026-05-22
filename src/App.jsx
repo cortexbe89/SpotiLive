@@ -69,8 +69,6 @@ function cleanAndTruncate(text, maxChars = 600) {
 }
 
 export default function SpotiLive() {
-  const [lastfmKey, setLastfmKey] = useState(() => localStorage.getItem("spotilive_lastfm_key") || "");
-  const [lastfmKeyInput, setLastfmKeyInput] = useState("");
   const [lastfmUser, setLastfmUser] = useState(() => localStorage.getItem("spotilive_lastfm_user") || "");
   const [lastfmUserInput, setLastfmUserInput] = useState("");
   const [token, setToken] = useState(null);
@@ -217,7 +215,7 @@ export default function SpotiLive() {
 
   const fetchLastfmStats = useCallback(async () => {
     if (!lastfmUser) return;
-    const key = lastfmKey || LASTFM_KEY;
+    const key = LASTFM_KEY;
     try {
       const [profile, recent] = await Promise.all([
         lastfmFetch({ method: "user.getInfo", api_key: key, user: lastfmUser }),
@@ -227,7 +225,7 @@ export default function SpotiLive() {
       const tracks = recent?.recenttracks?.track || [];
       setRecentTracks(Array.isArray(tracks) ? tracks.slice(0, 10) : [tracks]);
     } catch {}
-  }, [lastfmKey, lastfmUser]);
+  }, [lastfmUser]);
 
   const fetchSpotifyStats = useCallback(async () => {
     const [top4w, topArt] = await Promise.all([
@@ -247,7 +245,7 @@ export default function SpotiLive() {
       const trackName = track.name;
       const albumName = track.album.name;
       const yr = track.album.release_date?.slice(0, 4) || "";
-      const key = lastfmKey || LASTFM_KEY;
+      const key = LASTFM_KEY;
 
       // 1. Genres Spotify sur l'artiste (sans Last.fm)
       const spotifyArtist = await spotifyFetch(`artists/${track.artists[0].id}`).catch(() => null);
@@ -450,8 +448,10 @@ ANECDOTES
   }, [isPlaying, current]);
 
   const saveConfig = () => {
-    if (lastfmKeyInput) { localStorage.setItem("spotilive_lastfm_key", lastfmKeyInput); setLastfmKey(lastfmKeyInput); }
-    if (lastfmUserInput) { localStorage.setItem("spotilive_lastfm_user", lastfmUserInput); setLastfmUser(lastfmUserInput); }
+    if (lastfmUserInput.trim()) {
+      localStorage.setItem("spotilive_lastfm_user", lastfmUserInput.trim());
+      setLastfmUser(lastfmUserInput.trim());
+    }
     setShowConfig(false);
   };
 
@@ -480,17 +480,21 @@ ANECDOTES
           </button>
           <div style={styles.divider}><span style={styles.dividerText}>Last.fm (optionnel)</span></div>
           <div style={styles.configSection}>
-            <input style={styles.configInput} placeholder="Clé API Last.fm" value={lastfmKeyInput} onChange={e => setLastfmKeyInput(e.target.value)} />
-            <input style={{ ...styles.configInput, marginTop: 8 }} placeholder="Username Last.fm" value={lastfmUserInput} onChange={e => setLastfmUserInput(e.target.value)} />
-            {(lastfmKeyInput || lastfmUserInput) && (
+            <input
+              style={styles.configInput}
+              placeholder="Votre username Last.fm"
+              value={lastfmUserInput}
+              onChange={e => setLastfmUserInput(e.target.value)}
+            />
+            {lastfmUserInput && (
               <button style={{ ...styles.btnPrimary, marginTop: 8 }} onClick={() => {
-                if (lastfmKeyInput) { localStorage.setItem("spotilive_lastfm_key", lastfmKeyInput); setLastfmKey(lastfmKeyInput); }
-                if (lastfmUserInput) { localStorage.setItem("spotilive_lastfm_user", lastfmUserInput); setLastfmUser(lastfmUserInput); }
-              }}>Sauvegarder Last.fm</button>
+                localStorage.setItem("spotilive_lastfm_user", lastfmUserInput.trim());
+                setLastfmUser(lastfmUserInput.trim());
+              }}>Sauvegarder</button>
             )}
-            <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer" style={styles.configLink}>
-              Obtenir une clé API Last.fm (gratuit)
-            </a>
+            <p style={{ fontSize: 11, opacity: 0.4, color: "#f0ede8", lineHeight: 1.6 }}>
+              Entrez votre pseudo Last.fm pour voir vos statistiques d'écoute personnelles.
+            </p>
           </div>
         </div>
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600&family=DM+Mono:wght@300;400&display=swap'); *{box-sizing:border-box;margin:0;padding:0}`}</style>
@@ -705,10 +709,11 @@ ANECDOTES
           <div style={styles.modal} onClick={e => e.stopPropagation()}>
             <h2 style={styles.modalTitle}>Configuration</h2>
             <div style={styles.configSection}>
-              <label style={styles.configLabel}>Last.fm API Key</label>
-              <input style={styles.configInput} placeholder={lastfmKey ? "••••••••••••" : "API Key"} value={lastfmKeyInput} onChange={e => setLastfmKeyInput(e.target.value)} />
-              <label style={{ ...styles.configLabel, marginTop: 8 }}>Last.fm Username</label>
-              <input style={styles.configInput} placeholder={lastfmUser || "Username"} value={lastfmUserInput} onChange={e => setLastfmUserInput(e.target.value)} />
+              <label style={styles.configLabel}>Username Last.fm</label>
+              <input style={styles.configInput} placeholder={lastfmUser || "Votre pseudo Last.fm"} value={lastfmUserInput} onChange={e => setLastfmUserInput(e.target.value)} />
+              <p style={{ fontSize: 11, opacity: 0.4, color: "#f0ede8", marginTop: 6, lineHeight: 1.6 }}>
+                Entrez votre pseudo Last.fm pour voir vos stats d'écoute.
+              </p>
             </div>
             <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
               <button style={styles.btnPrimary} onClick={saveConfig}>Sauvegarder</button>
