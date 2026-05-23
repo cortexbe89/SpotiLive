@@ -249,59 +249,80 @@ export default function SpotiLive() {
   }, [spotifyFetch]);
 
   const fetchLyrics = async (track) => {
-    setLyrics({ text: null, translated: null, loading: true, error: null, lang: null });
+    setLyrics({ text: null, translated: false, loading: true, error: null, geniusUrl: null });
+    const artistName = track.artists[0].name;
+    // Nettoyer le titre : supprimer "(Remastered)", "(Live)", etc.
+    const parenIdx = track.name.indexOf("(");
+    const bracketIdx = track.name.indexOf("[");
+    let cleanTitle = track.name;
+    if (parenIdx > 2) cleanTitle = cleanTitle.slice(0, parenIdx).trim();
+    if (bracketIdx > 2) cleanTitle = cleanTitle.slice(0, bracketIdx).trim();
+
+    const geniusUrl = `https://genius.com/search?q=${encodeURIComponent(artistName + " " + cleanTitle)}`;
+
     try {
-      const artist = encodeURIComponent(track.artists[0].name);
-      const title = encodeURIComponent(track.name);
+      // lrclib.net — gratuit, sans clé, CORS ouvert, bonne couverture
+      const res = await fetch(
+        `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artistName)}&track_name=${encodeURIComponent(cleanTitle)}`
+      );
 
-      // Lyrics.ovh - gratuit, sans clé
-      const res = await fetch(`https://api.lyrics.ovh/v1/${artist}/${title}`);
-      if (!res.ok) {
-        setLyrics({ text: null, translated: null, loading: false, error: "Paroles non trouvées pour ce titre.", lang: null });
-        return;
+      if (res.ok) {
+        const data = await res.json();
+        const rawLyrics = (data.plainLyrics || "").trim();
+
+        if (rawLyrics && rawLyrics.length > 20) {
+          // Détecter si français (caractères accentués)
+          const frenchPattern = /[àâäéèêëîïôöùûüçœæ]/i;
+          const isFrench = frenchPattern.test(rawLyrics.slice(0, 300));
+
+          if (isFrench) {
+            setLyrics({ text: rawLyrics, translated: false, loading: false, error: null, geniusUrl });
+            return;
+          }
+
+          // Pas français → afficher d'abord, puis traduire via Groq
+          setLyrics({ text: rawLyrics, translated: false, loading: false, error: null, geniusUrl });
+
+          if (GROQ_API_KEY) {
+            try {
+              const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
+                body: JSON.stringify({
+                  model: GROQ_MODEL,
+                  messages: [{ role: "user", content: `Traduis ces paroles en français de façon naturelle et poétique. Garde exactement le formatage (sauts de ligne, strophes). Ne traduis pas les balises comme [Chorus], [Verse] — laisse-les en anglais. Réponds UNIQUEMENT avec la traduction.\n\n${rawLyrics.slice(0, 3000)}` }],
+                  temperature: 0.3,
+                  max_tokens: 2000,
+                }),
+              });
+              const groqData = await groqRes.json();
+              const translated = groqData.choices?.[0]?.message?.content?.trim();
+              if (translated && translated.length > 20) {
+                setLyrics({ text: translated, translated: true, loading: false, error: null, geniusUrl });
+              }
+            } catch {}
+          }
+          return;
+        }
       }
-      const data = await res.json();
-      const rawLyrics = data.lyrics?.trim();
-      if (!rawLyrics) {
-        setLyrics({ text: null, translated: null, loading: false, error: "Paroles non disponibles.", lang: null });
-        return;
+
+      // Fallback : lyrics.ovh
+      const res2 = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(artistName)}/${encodeURIComponent(cleanTitle)}`);
+      if (res2.ok) {
+        const data2 = await res2.json();
+        if (data2.lyrics && data2.lyrics.length > 20) {
+          setLyrics({ text: data2.lyrics.trim(), translated: false, loading: false, error: null, geniusUrl });
+          return;
+        }
       }
 
-      // Détection simple de la langue (présence de caractères français)
-      const frPattern = /[àâäéèêëîïôöùûüçœæ]/i;
-      const isFrench = frPattern.test(rawLyrics);
-
-      if (isFrench) {
-        // Déjà en français
-        setLyrics({ text: rawLyrics, translated: null, loading: false, error: null, lang: "fr" });
-      } else {
-        // Traduire via Groq
-        setLyrics({ text: rawLyrics, translated: null, loading: false, error: null, lang: "en" });
-        try {
-          const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
-            body: JSON.stringify({
-              model: GROQ_MODEL,
-              messages: [{
-                role: "user",
-                content: `Traduis ces paroles de chanson en français de manière naturelle et poétique, en conservant le formatage (sauts de ligne, strophes). Ne traduis pas les titres de sections comme [Chorus], [Verse], etc. — laisse-les en anglais. Réponds UNIQUEMENT avec la traduction, sans commentaire ni introduction.
-
-${rawLyrics.slice(0, 3000)}`
-              }],
-              temperature: 0.4,
-              max_tokens: 2000,
-            }),
-          });
-          const groqData = await groqRes.json();
-          const translated = groqData.choices?.[0]?.message?.content?.trim() || null;
-          setLyrics(prev => ({ ...prev, translated }));
-        } catch {}
-      }
+      // Rien trouvé
+      setLyrics({ text: null, translated: false, loading: false, error: "Paroles non trouvées automatiquement.", geniusUrl });
     } catch (e) {
-      setLyrics({ text: null, translated: null, loading: false, error: "Impossible de charger les paroles.", lang: null });
+      setLyrics({ text: null, translated: false, loading: false, error: "Erreur de chargement.", geniusUrl });
     }
   };
+
 
   const fetchRecommendations = async (track) => {
     const currentToken = sessionStorage.getItem("spotify_token");
