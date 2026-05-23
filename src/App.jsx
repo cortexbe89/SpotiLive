@@ -89,7 +89,7 @@ export default function SpotiLive() {
   const [aiContent, setAiContent] = useState(null);
   const [quickInfo, setQuickInfo] = useState({ genre: "—", ambiance: "—", playcount: null });
   const [recommendations, setRecommendations] = useState({ artists: [], error: null });
-  const [lyrics, setLyrics] = useState({ text: null, translated: false, loading: false, error: null, geniusUrl: null });
+  const [lyrics, setLyrics] = useState({ text: null, original: null, translated: false, loading: false, error: null, geniusUrl: null });
   const [aiLoading, setAiLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState("now");
@@ -249,9 +249,8 @@ export default function SpotiLive() {
   }, [spotifyFetch]);
 
   const fetchLyrics = async (track) => {
-    setLyrics({ text: null, translated: false, loading: true, error: null, geniusUrl: null });
+    setLyrics({ text: null, original: null, translated: false, loading: true, error: null, geniusUrl: null });
     const artistName = track.artists[0].name;
-    // Nettoyer le titre : supprimer "(Remastered)", "(Live)", etc.
     const parenIdx = track.name.indexOf("(");
     const bracketIdx = track.name.indexOf("[");
     let cleanTitle = track.name;
@@ -261,67 +260,72 @@ export default function SpotiLive() {
     const geniusUrl = `https://genius.com/search?q=${encodeURIComponent(artistName + " " + cleanTitle)}`;
 
     try {
-      // lrclib.net — gratuit, sans clé, CORS ouvert, bonne couverture
+      // lrclib.net — gratuit, sans clé, CORS ouvert
       const res = await fetch(
         `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artistName)}&track_name=${encodeURIComponent(cleanTitle)}`
       );
 
+      let rawLyrics = "";
       if (res.ok) {
         const data = await res.json();
-        const rawLyrics = (data.plainLyrics || "").trim();
-
-        if (rawLyrics && rawLyrics.length > 20) {
-          // Détecter si français (caractères accentués)
-          const frenchPattern = /[àâäéèêëîïôöùûüçœæ]/i;
-          const isFrench = frenchPattern.test(rawLyrics.slice(0, 300));
-
-          if (isFrench) {
-            setLyrics({ text: rawLyrics, translated: false, loading: false, error: null, geniusUrl });
-            return;
-          }
-
-          // Pas français → afficher d'abord, puis traduire via Groq
-          setLyrics({ text: rawLyrics, translated: false, loading: false, error: null, geniusUrl });
-
-          if (GROQ_API_KEY) {
-            try {
-              const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
-                body: JSON.stringify({
-                  model: GROQ_MODEL,
-                  messages: [{ role: "user", content: `Traduis ces paroles en français de façon naturelle et poétique. Garde exactement le formatage (sauts de ligne, strophes). Ne traduis pas les balises comme [Chorus], [Verse] — laisse-les en anglais. Réponds UNIQUEMENT avec la traduction.\n\n${rawLyrics.slice(0, 3000)}` }],
-                  temperature: 0.3,
-                  max_tokens: 2000,
-                }),
-              });
-              const groqData = await groqRes.json();
-              const translated = groqData.choices?.[0]?.message?.content?.trim();
-              if (translated && translated.length > 20) {
-                setLyrics({ text: translated, translated: true, loading: false, error: null, geniusUrl });
-              }
-            } catch {}
-          }
-          return;
-        }
+        rawLyrics = (data.plainLyrics || "").trim();
       }
 
-      // Fallback : lyrics.ovh
-      const res2 = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(artistName)}/${encodeURIComponent(cleanTitle)}`);
-      if (res2.ok) {
-        const data2 = await res2.json();
-        if (data2.lyrics && data2.lyrics.length > 20) {
-          setLyrics({ text: data2.lyrics.trim(), translated: false, loading: false, error: null, geniusUrl });
-          return;
-        }
+      // Fallback lyrics.ovh
+      if (!rawLyrics || rawLyrics.length < 20) {
+        try {
+          const res2 = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(artistName)}/${encodeURIComponent(cleanTitle)}`);
+          if (res2.ok) {
+            const data2 = await res2.json();
+            rawLyrics = (data2.lyrics || "").trim();
+          }
+        } catch {}
       }
 
-      // Rien trouvé
-      setLyrics({ text: null, translated: false, loading: false, error: "Paroles non trouvées automatiquement.", geniusUrl });
+      if (!rawLyrics || rawLyrics.length < 20) {
+        setLyrics({ text: null, original: null, translated: false, loading: false, error: "Paroles non trouvées automatiquement.", geniusUrl });
+        return;
+      }
+
+      // Détecter si déjà en français
+      const frenchPattern = /[àâäéèêëîïôöùûüçœæ]/i;
+      const isFrench = frenchPattern.test(rawLyrics.slice(0, 300));
+
+      if (isFrench) {
+        // Déjà en français — pas de traduction
+        setLyrics({ text: rawLyrics, original: rawLyrics, translated: false, loading: false, error: null, geniusUrl });
+        return;
+      }
+
+      // Afficher d'abord en version originale
+      setLyrics({ text: rawLyrics, original: rawLyrics, translated: false, loading: false, error: null, geniusUrl });
+
+      // Traduire via Groq (toutes langues → français)
+      if (GROQ_API_KEY) {
+        try {
+          const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
+            body: JSON.stringify({
+              model: GROQ_MODEL,
+              messages: [{ role: "user", content: `Traduis ces paroles de chanson en français de façon naturelle et poétique, quelle que soit la langue source (anglais, espagnol, portugais, italien, allemand, etc.). Garde exactement le formatage (sauts de ligne, strophes). Ne traduis pas les balises comme [Chorus], [Verse] — laisse-les telles quelles. Réponds UNIQUEMENT avec la traduction française, sans introduction ni commentaire.\n\n${rawLyrics.slice(0, 3000)}` }],
+              temperature: 0.3,
+              max_tokens: 2000,
+            }),
+          });
+          const groqData = await groqRes.json();
+          const translatedText = groqData.choices?.[0]?.message?.content?.trim();
+          if (translatedText && translatedText.length > 20) {
+            // Mise à jour avec la traduction — original conservé pour basculer
+            setLyrics(prev => ({ ...prev, text: translatedText, translated: true }));
+          }
+        } catch {}
+      }
     } catch (e) {
-      setLyrics({ text: null, translated: false, loading: false, error: "Erreur de chargement.", geniusUrl });
+      setLyrics({ text: null, original: null, translated: false, loading: false, error: "Erreur de chargement.", geniusUrl });
     }
   };
+
 
 
   const fetchRecommendations = async (track) => {
@@ -375,7 +379,7 @@ export default function SpotiLive() {
     setAiLoading(true);
     setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
     setRecommendations({ artists: [], error: null });
-    setLyrics({ text: null, translated: false, loading: false, error: null, geniusUrl: null });
+    setLyrics({ text: null, original: null, translated: false, loading: false, error: null, geniusUrl: null });
     setLyrics({ text: null, translated: null, loading: false, error: null, lang: null });
     try {
       const artistName = track.artists[0].name;
@@ -823,11 +827,25 @@ ANECDOTES
               </div>
             ) : lyrics.text ? (
               <>
-                {lyrics.translated && (
-                  <div style={styles.lyricsBadge}>
-                    <span>🌐 Traduit en français par IA</span>
-                  </div>
-                )}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  {lyrics.translated ? (
+                    <div style={styles.lyricsBadge}>🌐 Traduit en français par IA</div>
+                  ) : lyrics.original && lyrics.original !== lyrics.text ? (
+                    <div style={styles.lyricsBadge}>📝 Version originale</div>
+                  ) : <div />}
+                  {lyrics.original && !lyrics.original.match(/[àâäéèêëîïôöùûüçœæ]/i) && (
+                    <button
+                      style={styles.lyricsToggleBtn}
+                      onClick={() => setLyrics(prev => ({
+                        ...prev,
+                        text: prev.translated ? prev.original : (prev.text === prev.original ? prev.text : prev.original),
+                        translated: !prev.translated,
+                      }))}
+                    >
+                      {lyrics.translated ? "VO" : "🇫🇷 FR"}
+                    </button>
+                  )}
+                </div>
                 <pre style={styles.lyricsText}>{lyrics.text}</pre>
               </>
             ) : (
@@ -1132,6 +1150,7 @@ const styles = {
   lyricsText: { whiteSpace: "pre-wrap", fontFamily: "'Nunito Sans', 'Calibri', sans-serif", fontSize: 15, lineHeight: 2.0, color: "#e0e0e0", fontWeight: 300, letterSpacing: "0.2px" },
   lyricsEmpty: { textAlign: "center", padding: "60px 20px", color: "#b3b3b3" },
   lyricsGeniusBtn: { display: "inline-block", background: "#ffff64", color: "#000", borderRadius: 50, padding: "12px 24px", textDecoration: "none", fontWeight: 700, fontSize: 14 },
+  lyricsToggleBtn: { background: "#282828", border: "1px solid rgba(255,255,255,.15)", borderRadius: 20, padding: "6px 14px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Nunito Sans', sans-serif", letterSpacing: "0.5px" },
   recsWrap: { maxWidth: "min(580px, 100%)", margin: "0 auto", width: "100%", animation: "fadeIn .4s ease" },
   recsGrid: { display: "flex", flexDirection: "column" },
   recCardLink: { textDecoration: "none", color: "#fff" },
