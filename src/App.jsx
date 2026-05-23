@@ -287,9 +287,10 @@ export default function SpotiLive() {
         return;
       }
 
-      // Détecter si déjà en français
-      const frenchPattern = /[àâäéèêëîïôöùûüçœæ]/i;
-      const isFrench = frenchPattern.test(rawLyrics.slice(0, 300));
+      // Détecter si déjà en français via mots-clés fréquents
+      const frenchWords = /\b(je|tu|il|elle|nous|vous|ils|elles|le|la|les|un|une|des|et|est|dans|sur|avec|pour|pas|plus|mais|ou|donc|car|que|qui|quoi|mon|ma|mes|ton|ta|ses|son|leur|moi|toi|lui|tout|bien|même|très|encore|toujours|jamais|rien|comme|quand|si|alors|aussi|après|avant|sans|sous|entre|vers|depuis|jusqu|parce|puisque|pendant|contre|selon|chez|suis|avoir|être|faire|aller|venir|voir|dire|savoir|pouvoir|vouloir|devoir|prendre|donner|trouver|sentir|aimer|cœur|amour|nuit|jour|temps|vie|yeux|main|monde|dieu|feu|eau|air|lumière|ombre|rêve|peur|joie|larme|voix|chanson|musique)\b/gi;
+      const frenchMatches = (rawLyrics.slice(0, 400).match(frenchWords) || []).length;
+      const isFrench = frenchMatches >= 4;
 
       if (isFrench) {
         // Déjà en français — pas de traduction
@@ -828,12 +829,13 @@ ANECDOTES
             ) : lyrics.text ? (
               <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  {lyrics.translated ? (
-                    <div style={styles.lyricsBadge}>🌐 Traduit en français par IA</div>
-                  ) : lyrics.original && lyrics.original !== lyrics.text ? (
-                    <div style={styles.lyricsBadge}>📝 Version originale</div>
-                  ) : <div />}
-                  {lyrics.original && !lyrics.original.match(/[àâäéèêëîïôöùûüçœæ]/i) && (
+                  {lyrics.translated
+                    ? <div style={styles.lyricsBadge}>🌐 Traduit en français par IA</div>
+                    : lyrics.original && lyrics.original !== lyrics.text
+                      ? <div style={styles.lyricsBadge}>📝 Version originale</div>
+                      : <div />
+                  }
+                  {lyrics.original && lyrics.translated !== null && lyrics.original !== lyrics.text && (
                     <button
                       style={styles.lyricsToggleBtn}
                       onClick={() => setLyrics(prev => ({
