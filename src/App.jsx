@@ -1176,7 +1176,7 @@ const styles = {
   lyricsBilingual: { display: "flex", flexDirection: "column", gap: 0 },
   lyricsLinePair: { marginBottom: 6 },
   lyricsBlankLine: { height: 14 },
-  lyricsOrigLine: { display: "block", fontSize: 13, lineHeight: 1.6, color: "#888888", fontStyle: "italic", fontWeight: 300 },
+  lyricsOrigLine: { display: "block", fontSize: 13, lineHeight: 1.6, color: "#aaaaaa", fontStyle: "italic", fontWeight: 300 },
   lyricsTransLine: { display: "block", fontSize: 16, lineHeight: 1.8, color: "#ffffff", fontWeight: 600, marginTop: 2 },
   lyricsToggleBtn: { background: "#282828", border: "1px solid rgba(255,255,255,.15)", borderRadius: 20, padding: "6px 14px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Nunito Sans', sans-serif", letterSpacing: "0.5px" },
   recsWrap: { maxWidth: "min(580px, 100%)", margin: "0 auto", width: "100%", animation: "fadeIn .4s ease" },
