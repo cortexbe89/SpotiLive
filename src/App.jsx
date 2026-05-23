@@ -549,8 +549,6 @@ ANECDOTES
       }
 
       setAiContent({ bio, explication, anecdotes, genre, ambiance });
-      // Fetch recommendations with the same token (still valid here)
-      fetchRecommendations(track);
     } catch (e) {
       console.error("generateAiContent error:", e);
       setAiContent({ bio: "Erreur: " + e.message, explication: "", anecdotes: [], genre: "—", ambiance: "—" });
@@ -568,6 +566,8 @@ ANECDOTES
     if (track.id !== lastTrackRef.current) {
       lastTrackRef.current = track.id;
       generateAiContent(track);
+      fetchLyrics(track);
+      fetchRecommendations(track);
     }
   }, [spotifyFetch]);
 
