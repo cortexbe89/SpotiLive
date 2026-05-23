@@ -89,6 +89,7 @@ export default function SpotiLive() {
   const [aiContent, setAiContent] = useState(null);
   const [quickInfo, setQuickInfo] = useState({ genre: "—", ambiance: "—", playcount: null });
   const [recommendations, setRecommendations] = useState({ artists: [], error: null });
+  const [lyrics, setLyrics] = useState({ text: null, translated: false, loading: false, error: null, geniusUrl: null });
   const [aiLoading, setAiLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState("now");
@@ -247,6 +248,61 @@ export default function SpotiLive() {
     if (topArt?.items) setTopArtists(topArt.items);
   }, [spotifyFetch]);
 
+  const fetchLyrics = async (track) => {
+    setLyrics({ text: null, translated: null, loading: true, error: null, lang: null });
+    try {
+      const artist = encodeURIComponent(track.artists[0].name);
+      const title = encodeURIComponent(track.name);
+
+      // Lyrics.ovh - gratuit, sans clé
+      const res = await fetch(`https://api.lyrics.ovh/v1/${artist}/${title}`);
+      if (!res.ok) {
+        setLyrics({ text: null, translated: null, loading: false, error: "Paroles non trouvées pour ce titre.", lang: null });
+        return;
+      }
+      const data = await res.json();
+      const rawLyrics = data.lyrics?.trim();
+      if (!rawLyrics) {
+        setLyrics({ text: null, translated: null, loading: false, error: "Paroles non disponibles.", lang: null });
+        return;
+      }
+
+      // Détection simple de la langue (présence de caractères français)
+      const frPattern = /[àâäéèêëîïôöùûüçœæ]/i;
+      const isFrench = frPattern.test(rawLyrics);
+
+      if (isFrench) {
+        // Déjà en français
+        setLyrics({ text: rawLyrics, translated: null, loading: false, error: null, lang: "fr" });
+      } else {
+        // Traduire via Groq
+        setLyrics({ text: rawLyrics, translated: null, loading: false, error: null, lang: "en" });
+        try {
+          const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
+            body: JSON.stringify({
+              model: GROQ_MODEL,
+              messages: [{
+                role: "user",
+                content: `Traduis ces paroles de chanson en français de manière naturelle et poétique, en conservant le formatage (sauts de ligne, strophes). Ne traduis pas les titres de sections comme [Chorus], [Verse], etc. — laisse-les en anglais. Réponds UNIQUEMENT avec la traduction, sans commentaire ni introduction.
+
+${rawLyrics.slice(0, 3000)}`
+              }],
+              temperature: 0.4,
+              max_tokens: 2000,
+            }),
+          });
+          const groqData = await groqRes.json();
+          const translated = groqData.choices?.[0]?.message?.content?.trim() || null;
+          setLyrics(prev => ({ ...prev, translated }));
+        } catch {}
+      }
+    } catch (e) {
+      setLyrics({ text: null, translated: null, loading: false, error: "Impossible de charger les paroles.", lang: null });
+    }
+  };
+
   const fetchRecommendations = async (track) => {
     const currentToken = sessionStorage.getItem("spotify_token");
     if (!currentToken) return;
@@ -298,6 +354,8 @@ export default function SpotiLive() {
     setAiLoading(true);
     setQuickInfo({ genre: "—", ambiance: "—", playcount: null });
     setRecommendations({ artists: [], error: null });
+    setLyrics({ text: null, translated: false, loading: false, error: null, geniusUrl: null });
+    setLyrics({ text: null, translated: null, loading: false, error: null, lang: null });
     try {
       const artistName = track.artists[0].name;
       const trackName = track.name;
@@ -535,7 +593,7 @@ ANECDOTES
   };
 
   const pct = current ? (progress / current.duration_ms) * 100 : 0;
-  const TABS = ["now", "recs", "stats", "history"];
+  const TABS = ["now", "lyrics", "recs", "stats", "history"];
 
   const handleTouchStart = (e) => {
     touchStartX.current = e.touches[0].clientX;
@@ -625,7 +683,7 @@ ANECDOTES
               document.getElementById(`tab-${tab}`)?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
             }}
           >
-            {{ now: "En cours", recs: "Artistes liés", stats: "Statistiques", history: "Historique" }[tab]}
+            {{ now: "En cours", lyrics: "Paroles", recs: "Artistes liés", stats: "Statistiques", history: "Historique" }[tab]}
           </button>
         ))}
       </nav>
@@ -732,6 +790,35 @@ ANECDOTES
                 <div style={styles.aiPlaceholder}><p>Les informations apparaîtront ici</p></div>
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === "lyrics" && (
+          <div style={styles.lyricsWrap}>
+            {lyrics.loading ? (
+              <div style={styles.aiLoading}>
+                <div style={styles.aiSpinner} />
+                <p>Chargement des paroles…</p>
+              </div>
+            ) : lyrics.text ? (
+              <>
+                {lyrics.translated && (
+                  <div style={styles.lyricsBadge}>
+                    <span>🌐 Traduit en français par IA</span>
+                  </div>
+                )}
+                <pre style={styles.lyricsText}>{lyrics.text}</pre>
+              </>
+            ) : (
+              <div style={styles.lyricsEmpty}>
+                <p style={{ marginBottom: 16 }}>{lyrics.error || "Paroles non disponibles."}</p>
+                {lyrics.geniusUrl && (
+                  <a href={lyrics.geniusUrl} target="_blank" rel="noreferrer" style={styles.lyricsGeniusBtn}>
+                    🔍 Rechercher sur Genius
+                  </a>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1019,6 +1106,11 @@ const styles = {
   recArrow: { fontSize: 11, color: "#535353", flexShrink: 0 },
 
   // ── Artistes liés (onglet) ────────────────────────────────────────────────
+  lyricsWrap: { maxWidth: "min(580px, 100%)", margin: "0 auto", width: "100%", animation: "fadeIn .4s ease" },
+  lyricsBadge: { background: "rgba(29,185,84,.12)", border: "1px solid rgba(29,185,84,.2)", borderRadius: 8, padding: "8px 14px", marginBottom: 16, fontSize: 12, color: "#1db954", fontWeight: 600 },
+  lyricsText: { whiteSpace: "pre-wrap", fontFamily: "'Nunito Sans', 'Calibri', sans-serif", fontSize: 15, lineHeight: 2.0, color: "#e0e0e0", fontWeight: 300, letterSpacing: "0.2px" },
+  lyricsEmpty: { textAlign: "center", padding: "60px 20px", color: "#b3b3b3" },
+  lyricsGeniusBtn: { display: "inline-block", background: "#ffff64", color: "#000", borderRadius: 50, padding: "12px 24px", textDecoration: "none", fontWeight: 700, fontSize: 14 },
   recsWrap: { maxWidth: "min(580px, 100%)", margin: "0 auto", width: "100%", animation: "fadeIn .4s ease" },
   recsGrid: { display: "flex", flexDirection: "column" },
   recCardLink: { textDecoration: "none", color: "#fff" },
