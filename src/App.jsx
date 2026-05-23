@@ -835,20 +835,41 @@ ANECDOTES
                       ? <div style={styles.lyricsBadge}>📝 Version originale</div>
                       : <div />
                   }
-                  {lyrics.original && lyrics.translated !== null && lyrics.original !== lyrics.text && (
+                  {lyrics.original && lyrics.text && lyrics.original !== lyrics.text && (
                     <button
                       style={styles.lyricsToggleBtn}
                       onClick={() => setLyrics(prev => ({
                         ...prev,
-                        text: prev.translated ? prev.original : (prev.text === prev.original ? prev.text : prev.original),
                         translated: !prev.translated,
                       }))}
                     >
-                      {lyrics.translated ? "VO" : "🇫🇷 FR"}
+                      {lyrics.translated ? "VO seule" : "🇫🇷 Bilingue"}
                     </button>
                   )}
                 </div>
-                <pre style={styles.lyricsText}>{lyrics.text}</pre>
+                {lyrics.translated && lyrics.original ? (
+                  // Mode bilingue : original grisé + traduction française ligne par ligne
+                  <div style={styles.lyricsBilingual}>
+                    {lyrics.original.split("\n").map((origLine, i) => {
+                      const transLine = (lyrics.text || "").split("\n")[i] || "";
+                      const isEmpty = !origLine.trim();
+                      return (
+                        <div key={i} style={isEmpty ? styles.lyricsBlankLine : styles.lyricsLinePair}>
+                          {!isEmpty && (
+                            <>
+                              <span style={styles.lyricsOrigLine}>{origLine}</span>
+                              {transLine && transLine !== origLine && (
+                                <span style={styles.lyricsTransLine}>{transLine}</span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <pre style={styles.lyricsText}>{lyrics.text}</pre>
+                )}
               </>
             ) : (
               <div style={styles.lyricsEmpty}>
@@ -1152,6 +1173,11 @@ const styles = {
   lyricsText: { whiteSpace: "pre-wrap", fontFamily: "'Nunito Sans', 'Calibri', sans-serif", fontSize: 15, lineHeight: 2.0, color: "#e0e0e0", fontWeight: 300, letterSpacing: "0.2px" },
   lyricsEmpty: { textAlign: "center", padding: "60px 20px", color: "#b3b3b3" },
   lyricsGeniusBtn: { display: "inline-block", background: "#ffff64", color: "#000", borderRadius: 50, padding: "12px 24px", textDecoration: "none", fontWeight: 700, fontSize: 14 },
+  lyricsBilingual: { display: "flex", flexDirection: "column", gap: 0 },
+  lyricsLinePair: { marginBottom: 6 },
+  lyricsBlankLine: { height: 14 },
+  lyricsOrigLine: { display: "block", fontSize: 13, lineHeight: 1.6, color: "#535353", fontStyle: "italic", fontWeight: 300 },
+  lyricsTransLine: { display: "block", fontSize: 15, lineHeight: 1.7, color: "#e0e0e0", fontWeight: 400, marginTop: 1 },
   lyricsToggleBtn: { background: "#282828", border: "1px solid rgba(255,255,255,.15)", borderRadius: 20, padding: "6px 14px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Nunito Sans', sans-serif", letterSpacing: "0.5px" },
   recsWrap: { maxWidth: "min(580px, 100%)", margin: "0 auto", width: "100%", animation: "fadeIn .4s ease" },
   recsGrid: { display: "flex", flexDirection: "column" },
