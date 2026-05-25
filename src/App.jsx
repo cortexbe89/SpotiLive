@@ -302,6 +302,7 @@ export default function SpotiLive() {
       setLyrics({ text: rawLyrics, original: rawLyrics, translated: false, loading: false, error: null, geniusUrl });
 
       // Traduire via Groq (toutes langues → français)
+      let translationDone = false;
       if (GROQ_API_KEY) {
         try {
           const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -315,12 +316,53 @@ export default function SpotiLive() {
             }),
           });
           const groqData = await groqRes.json();
-          const translatedText = groqData.choices?.[0]?.message?.content?.trim();
-          if (translatedText && translatedText.length > 20) {
-            // Mise à jour avec la traduction — original conservé pour basculer
-            setLyrics(prev => ({ ...prev, text: translatedText, translated: true }));
+          if (groqData.error) {
+            console.warn("Groq lyrics error:", groqData.error.message);
+          } else {
+            const translatedText = groqData.choices?.[0]?.message?.content?.trim();
+            if (translatedText && translatedText.length > 20) {
+              setLyrics(prev => ({ ...prev, text: translatedText, translated: true }));
+              translationDone = true;
+            }
           }
-        } catch {}
+        } catch (e) {
+          console.warn("Groq translation failed:", e.message);
+        }
+      }
+
+      // Fallback : MyMemory si Groq échoue (traduit par blocs de 500 chars)
+      if (!translationDone) {
+        try {
+          const lines = rawLyrics.split("\n");
+          const chunks = [];
+          let current = "";
+          for (const line of lines) {
+            if ((current + "\n" + line).length > 450) {
+              if (current) chunks.push(current.trim());
+              current = line;
+            } else {
+              current = current ? current + "\n" + line : line;
+            }
+          }
+          if (current) chunks.push(current.trim());
+
+          const translated = await Promise.all(
+            chunks.map(async chunk => {
+              if (!chunk.trim()) return chunk;
+              const res = await fetch(
+                `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=autodetect|fr`
+              );
+              const data = await res.json();
+              return data.responseData?.translatedText || chunk;
+            })
+          );
+          const fullTranslation = translated.join("\n");
+          if (fullTranslation.length > 20) {
+            setLyrics(prev => ({ ...prev, text: fullTranslation, translated: true }));
+          }
+        } catch (e) {
+          console.warn("MyMemory fallback failed:", e.message);
+        }
       }
     } catch (e) {
       setLyrics({ text: null, original: null, translated: false, loading: false, error: "Erreur de chargement.", geniusUrl });
