@@ -87,6 +87,7 @@ export default function SpotiLive() {
   const [lastfmProfile, setLastfmProfile] = useState(null);
 
   const [aiContent, setAiContent] = useState(null);
+  const [groqStatus, setGroqStatus] = useState(null); // 'ok' | 'quota' | 'error'
   const [quickInfo, setQuickInfo] = useState({ genre: "—", ambiance: "—", playcount: null });
   const [recommendations, setRecommendations] = useState({ artists: [], error: null });
   const [lyrics, setLyrics] = useState({ text: null, original: null, translated: false, loading: false, error: null, geniusUrl: null });
@@ -537,6 +538,12 @@ ANECDOTES
         }),
       });
       const groqData = await groqRes.json();
+      if (groqData.error) {
+        console.warn("Groq quota/error:", groqData.error.message);
+        setGroqStatus("quota");
+      } else if (groqData.choices?.[0]) {
+        setGroqStatus("ok");
+      }
       const raw = groqData.choices?.[0]?.message?.content || "";
 
       if (raw) {
@@ -576,15 +583,25 @@ ANECDOTES
           .slice(0, 4);
       }
 
-      // 6. Fallbacks uniquement si Groq échoue complètement
+      // 6. Fallbacks si Groq échoue — on utilise Wikipedia et Last.fm directement
       if (!bio) {
         bio = wikiArtistClean || lfmBioClean || `${artistName} est un artiste musical dont les informations biographiques n'ont pas pu être récupérées.`;
       }
       if (!explication) {
-        const dur = track.duration_ms
-          ? `${Math.floor(track.duration_ms/60000)}m${String(Math.floor((track.duration_ms%60000)/1000)).padStart(2,"0")}s`
-          : null;
-        explication = `"${trackName}" est un titre de ${artistName}, extrait de l'album "${albumName}"${yr ? ` (${yr})` : ""}${dur ? `. Durée : ${dur}` : ""}.`;
+        // Fallback enrichi : wiki chanson Last.fm ou Wikipedia chanson
+        const lfmWikiText = (lfmTrack?.wiki?.content || lfmTrack?.wiki?.summary || "")
+          .replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        if (lfmWikiText.length > 50) {
+          explication = cleanAndTruncate(lfmWikiText, 600);
+        } else if (wikiTrackClean && wikiTrackClean.length > 50) {
+          explication = cleanAndTruncate(wikiTrackClean, 600);
+        } else {
+          const dur = track.duration_ms
+            ? `${Math.floor(track.duration_ms/60000)}m${String(Math.floor((track.duration_ms%60000)/1000)).padStart(2,"0")}s`
+            : null;
+          const plays = lfmTrack?.playcount ? ` Elle totalise ${Number(lfmTrack.playcount).toLocaleString("fr-BE")} écoutes sur Last.fm.` : "";
+          explication = `"${trackName}" est un titre de ${artistName}, extrait de l'album "${albumName}"${yr ? ` (${yr})` : ""}${dur ? `. Durée : ${dur}.` : "."}${plays}`;
+        }
       }
       if (anecdotes.length === 0) {
         if (mbDur) anecdotes.push(`Durée officielle selon MusicBrainz : ${mbDur}.`);
@@ -813,7 +830,10 @@ ANECDOTES
                     <p style={styles.aiText}>{aiContent.bio}</p>
                   </div>
                   <div style={styles.aiBlock}>
-                    <h3 style={styles.aiTitle}>La chanson</h3>
+                    <h3 style={styles.aiTitle}>
+                      La chanson
+                      {groqStatus === "quota" && <span style={{ fontSize: 9, color: "#535353", marginLeft: 8, fontStyle: "normal" }}>· IA indisponible</span>}
+                    </h3>
                     <p style={styles.aiText}>{aiContent.explication}</p>
                   </div>
                   {aiContent.anecdotes?.length > 0 && (
